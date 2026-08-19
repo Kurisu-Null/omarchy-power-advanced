@@ -1,0 +1,212 @@
+#!/bin/bash
+set -eo pipefail
+
+get_ram_bytes() {
+    local ram
+    ram=$(awk '/MemTotal/ {print $2 * 1024}' /proc/meminfo 2>/dev/null || echo 0)
+    if [ -z "$ram" ] || ! [[ "$ram" =~ ^[0-9]+$ ]]; then
+        echo 0
+    else
+        echo "$ram"
+    fi
+}
+
+get_swap_devices() {
+    local swapon_out
+    swapon_out=$(swapon --show=NAME,TYPE,SIZE,USED,PRIO --raw --noheadings --bytes 2>/dev/null || true)
+    if [ -z "$swapon_out" ]; then
+        echo "[]"
+        return
+    fi
+    echo "$swapon_out" | jq -R -s -c '
+        [split("\n") | .[] | [splits("\\s+") | select(length > 0)] | select(length >= 5) | 
+        {
+          path: .[0],
+          type: .[1],
+          size_bytes: ((.[2] // 0) | try tonumber catch 0),
+          used_bytes: ((.[3] // 0) | try tonumber catch 0),
+          priority: ((.[4] // 0) | try tonumber catch 0)
+        }]
+    ' 2>/dev/null || echo "[]"
+}
+
+RAM_BYTES=$(get_ram_bytes)
+SWAP_DEVICES=$(get_swap_devices)
+TOTAL_SWAP=$(echo "$SWAP_DEVICES" | jq '[.[] | select(.path | contains("zram") | not) | .size_bytes] | add // 0' 2>/dev/null || echo 0)
+if [ -z "$TOTAL_SWAP" ] || ! [[ "$TOTAL_SWAP" =~ ^[0-9]+$ ]]; then
+    TOTAL_SWAP=0
+fi
+
+ADEQUATE=false
+if [ "$TOTAL_SWAP" -ge "$RAM_BYTES" ] && [ "$RAM_BYTES" -gt 0 ]; then
+    ADEQUATE=true
+fi
+
+RESUME_DEV=$(cat /sys/power/resume 2>/dev/null | tr -d '[:space:]' || echo "")
+RESUME_OFFSET=$(cat /sys/power/resume_offset 2>/dev/null | tr -d '[:space:]' || echo "0")
+if [ -z "$RESUME_OFFSET" ]; then
+    RESUME_OFFSET="0"
+fi
+
+CMDLINE=$(cat /proc/cmdline 2>/dev/null || echo "")
+CMDLINE_HAS_RESUME=false
+CMDLINE_HAS_OFFSET=false
+if echo "$CMDLINE" | grep -q "resume="; then CMDLINE_HAS_RESUME=true; fi
+if echo "$CMDLINE" | grep -q "resume_offset="; then CMDLINE_HAS_OFFSET=true; fi
+SYSFS_MATCHES=true
+
+SLEEP_STATES=$(cat /sys/power/state 2>/dev/null || echo "")
+FREEZE=false; MEM=false; DISK=false
+if echo "$SLEEP_STATES" | grep -qw "freeze"; then FREEZE=true; fi
+if echo "$SLEEP_STATES" | grep -qw "mem"; then MEM=true; fi
+if echo "$SLEEP_STATES" | grep -qw "disk"; then DISK=true; fi
+
+HIBERNATE_AVAIL=false
+if systemctl cat systemd-hibernate.service >/dev/null 2>&1; then HIBERNATE_AVAIL=true; fi
+STH_AVAIL=false
+if systemctl cat systemd-suspend-then-hibernate.service >/dev/null 2>&1; then STH_AVAIL=true; fi
+
+RESUME_HOOK=false
+HOOK_ORDER=false
+if grep -q 'HOOKS.*systemd' /etc/mkinitcpio.conf 2>/dev/null; then
+    # systemd hook automatically handles resume, so no explicit resume hook is needed
+    RESUME_HOOK=true
+    HOOK_ORDER=true
+elif grep -q 'HOOKS.*resume' /etc/mkinitcpio.conf 2>/dev/null; then
+    RESUME_HOOK=true
+    if awk '/^HOOKS=/ { if (match($0, /filesystems.*resume/)) print "ok" }' /etc/mkinitcpio.conf | grep -q ok; then
+        HOOK_ORDER=true
+    fi
+fi
+
+PP_BACKEND="none"; PP_ACTIVE="none"; PP_AVAIL="[]"
+if command -v powerprofilesctl >/dev/null 2>&1; then
+    PP_BACKEND="power-profiles-daemon"
+    PP_ACTIVE=$(powerprofilesctl get 2>/dev/null || echo "none")
+    PP_AVAIL=$(powerprofilesctl list 2>/dev/null | awk -F: '/^[ *]*[a-zA-Z0-9_-]+:[[:space:]]*$/ { sub(/^[ *]+/, "", $1); sub(/[[:space:]]+$/, "", $1); print $1 }' | jq -R -s -c 'split("\n") | map(select(length > 0))' 2>/dev/null || echo "[]")
+    if [ -z "$PP_AVAIL" ] || ! echo "$PP_AVAIL" | jq -e . >/dev/null 2>&1 || [ "$PP_AVAIL" = "[]" ]; then
+        PP_AVAIL='["power-saver","balanced","performance"]'
+    fi
+fi
+
+POWER_SUPPLY_DIR="${OMARCHY_POWER_SUPPLY_PATH:-/sys/class/power_supply}"
+BAT_CAP=100; BAT_STAT="Unknown"; AC_ONLINE=false; BAT_PRES=false
+for supply in "$POWER_SUPPLY_DIR"/*; do
+    [ -d "$supply" ] || continue
+    type=$(cat "$supply/type" 2>/dev/null || echo "")
+    if [ "$type" = "Battery" ]; then
+        BAT_PRES=true
+        BAT_CAP=$(cat "$supply/capacity" 2>/dev/null || echo 100)
+        BAT_STAT=$(cat "$supply/status" 2>/dev/null || echo "Unknown")
+    elif [ "$type" = "Mains" ]; then
+        online=$(cat "$supply/online" 2>/dev/null || echo 0)
+        if [ "$online" = "1" ]; then AC_ONLINE=true; fi
+    fi
+done
+
+LOGIND_CONF="/etc/systemd/logind.conf"
+LOGIND_LID="suspend"; LOGIND_LID_EXT="suspend"; LOGIND_IDLE="ignore"; LOGIND_IDLE_SEC=0
+get_logind_val() {
+    local key="$1"
+    local val=""
+    for file in "$LOGIND_CONF" /etc/systemd/logind.conf.d/*.conf; do
+        [ -f "$file" ] || continue
+        local res=$(awk -F= -v k="^$key" '$1 ~ k {print $2}' "$file" | tail -n 1 | tr -d '[:space:]')
+        [ -n "$res" ] && val="$res"
+    done
+    echo "$val"
+}
+val=$(get_logind_val "HandleLidSwitch"); [ -n "$val" ] && LOGIND_LID="$val"
+val=$(get_logind_val "HandleLidSwitchExternalPower"); [ -n "$val" ] && LOGIND_LID_EXT="$val"
+val=$(get_logind_val "IdleAction"); [ -n "$val" ] && LOGIND_IDLE="$val"
+val=$(get_logind_val "IdleActionSec"); [ -n "$val" ] && LOGIND_IDLE_SEC="$val"
+
+SLEEP_CONF="/etc/systemd/sleep.conf"
+SLEEP_HIB_DELAY="120min"
+get_sleep_val() {
+    local key="$1"
+    local val=""
+    for file in "$SLEEP_CONF" /etc/systemd/sleep.conf.d/*.conf; do
+        [ -f "$file" ] || continue
+        local res=$(awk -F= -v k="^$key" '$1 ~ k {print $2}' "$file" | tail -n 1 | tr -d '[:space:]')
+        [ -n "$res" ] && val="$res"
+    done
+    echo "$val"
+}
+val=$(get_sleep_val "HibernateDelaySec"); [ -n "$val" ] && SLEEP_HIB_DELAY="$val"
+
+jq -n \
+  --argjson ram "$RAM_BYTES" \
+  --argjson swap_devs "$SWAP_DEVICES" \
+  --argjson total_swap "$TOTAL_SWAP" \
+  --argjson adequate "$ADEQUATE" \
+  --arg resume_dev "$RESUME_DEV" \
+  --arg resume_off "$RESUME_OFFSET" \
+  --argjson has_res "$CMDLINE_HAS_RESUME" \
+  --argjson has_off "$CMDLINE_HAS_OFFSET" \
+  --argjson matches "$SYSFS_MATCHES" \
+  --argjson hook "$RESUME_HOOK" \
+  --argjson order "$HOOK_ORDER" \
+  --argjson freeze "$FREEZE" \
+  --argjson mem "$MEM" \
+  --argjson disk "$DISK" \
+  --argjson h_avail "$HIBERNATE_AVAIL" \
+  --argjson sth_avail "$STH_AVAIL" \
+  --arg pp_backend "$PP_BACKEND" \
+  --arg pp_active "$PP_ACTIVE" \
+  --argjson pp_avail "$PP_AVAIL" \
+  --argjson b_pres "$BAT_PRES" \
+  --argjson b_cap "$BAT_CAP" \
+  --arg b_stat "$BAT_STAT" \
+  --argjson ac_on "$AC_ONLINE" \
+  --arg lid "$LOGIND_LID" \
+  --arg lid_ext "$LOGIND_LID_EXT" \
+  --arg idle "$LOGIND_IDLE" \
+  --arg idle_sec "$LOGIND_IDLE_SEC" \
+  --arg hib_delay "$SLEEP_HIB_DELAY" \
+  '{
+    ram_bytes: $ram,
+    swap: {
+      devices: $swap_devs,
+      total_disk_swap_bytes: $total_swap,
+      adequate_for_hibernate: $adequate
+    },
+    resume: {
+      device: $resume_dev,
+      offset: (($resume_off | try tonumber catch 0)),
+      kernel_cmdline_has_resume: $has_res,
+      kernel_cmdline_has_offset: $has_off,
+      sysfs_matches_cmdline: $matches
+    },
+    initramfs: {
+      resume_hook_present: $hook,
+      hook_order_correct: $order
+    },
+    sleep_states: {
+      freeze: $freeze,
+      mem: $mem,
+      disk: $disk
+    },
+    hibernate_available: $h_avail,
+    suspend_then_hibernate_available: $sth_avail,
+    power_profiles: {
+      backend: $pp_backend,
+      available: $pp_avail,
+      active: $pp_active
+    },
+    battery: {
+      present: $b_pres,
+      capacity: $b_cap,
+      status: $b_stat,
+      ac_online: $ac_on
+    },
+    logind: {
+      handle_lid_switch: $lid,
+      handle_lid_switch_external_power: $lid_ext,
+      idle_action: $idle,
+      idle_action_sec: $idle_sec
+    },
+    sleep_config: {
+      hibernate_delay_sec: $hib_delay
+    }
+  }'
