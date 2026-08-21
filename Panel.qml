@@ -133,6 +133,24 @@ Panel {
     }
   }
 
+  property string pendingWrite: ""
+  Process {
+    id: configWriteProc
+    command: ["bash", "-c", "echo '" + root.pendingWrite + "' | base64 -d > $HOME/.config/onlyvishesh.power-manager.json"]
+    onExited: {
+      root.config = JSON.parse(JSON.stringify(root.editConfig))
+      applyProc.running = true
+    }
+  }
+
+  Process {
+    id: applyProc
+    command: ["pkexec", "/home/onlyvishesh/.config/omarchy/plugins/power-manager-git/scripts/power-manager-apply"]
+    onExited: {
+      profilesProc.running = true
+    }
+  }
+
   Process {
     id: actionProc
     onExited: { if (!profilesProc.running) profilesProc.running = true }
@@ -193,6 +211,8 @@ Panel {
     onTriggered: root.refresh()
   }
 
+  property var actionOptions: ["ignore", "suspend", "hybrid-sleep", "hibernate", "suspend-then-hibernate", "poweroff"]
+  property var profileOptions: ["power-saver", "balanced", "performance"]
   property var tabOptions: [
     { value: "overview", label: "Overview", icon: "󰂄" },
     { value: "profiles", label: "Profiles", icon: "󰓅" },
@@ -400,6 +420,229 @@ Panel {
           }
         }
       }
+
+      // ═══════════ PROFILES TAB ═══════════
+      Column {
+        width: parent.width
+        spacing: Style.space(14)
+        visible: root.currentTab === "profiles"
+
+        PanelSectionHeader {
+          text: "ACTIVE PROFILE"
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+        }
+        Row {
+          id: profileRow2
+          width: parent.width
+          spacing: Style.space(6)
+          readonly property real cellWidth: root.profiles.length > 0
+            ? (width - spacing * (root.profiles.length - 1)) / root.profiles.length : 0
+          Repeater {
+            model: root.profiles
+            Button {
+              required property var modelData
+              required property int index
+              width: profileRow2.cellWidth
+              iconText: Model.profileIcon(String(modelData))
+              iconSize: Style.font.title
+              text: String(modelData).charAt(0).toUpperCase() + String(modelData).slice(1)
+              fontSize: Style.font.bodySmall
+              foreground: root.bar ? root.bar.foreground : Color.foreground
+              fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+              horizontalPadding: Style.spacing.controlPaddingX
+              verticalPadding: Style.spacing.controlPaddingY + Style.space(4)
+              bordered: true
+              active: root.activeProfile === modelData
+              onClicked: root.setSystemProfile(modelData)
+            }
+          }
+        }
+
+        PanelSeparator { foreground: root.bar ? root.bar.foreground : Color.foreground }
+
+        PanelSectionHeader {
+          text: "AUTOMATIC PROFILE RULES"
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+        }
+        SettingRow { label: "When on AC power"; widgetType: "dropdown"; options: root.profileOptions; configKey: "profiles.ac" }
+        SettingRow { label: "Battery High"; widgetType: "dropdown"; options: root.profileOptions; configKey: "profiles.batteryHigh" }
+        SettingRow { label: "Battery Low"; widgetType: "dropdown"; options: root.profileOptions; configKey: "profiles.batteryLow" }
+        SettingRow { label: "Low battery threshold (%)"; widgetType: "number"; configKey: "batteryThreshold" }
+
+        PanelSeparator { foreground: root.bar ? root.bar.foreground : Color.foreground }
+
+        PanelSectionHeader {
+          text: "AUTOMATIC BRIGHTNESS"
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+        }
+        SettingRow { label: "Auto-adjust brightness"; widgetType: "toggle"; configKey: "brightness.auto" }
+        SettingRow { label: "AC power (% or 0 for skip)"; widgetType: "number"; configKey: "brightness.ac" }
+        SettingRow { label: "Battery High (% or 0 for skip)"; widgetType: "number"; configKey: "brightness.batteryHigh" }
+        SettingRow { label: "Battery Low (% or 0 for skip)"; widgetType: "number"; configKey: "brightness.batteryLow" }
+
+        Button {
+          width: parent.width
+          text: "Apply Rules"
+          bordered: true
+          active: root.configDirty
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+          onClicked: { root.pendingWrite = Qt.btoa(JSON.stringify(root.editConfig, null, 2)); configWriteProc.running = true }
+        }
+      }
+
+      // ═══════════ ADVANCED TAB ═══════════
+      Column {
+        width: parent.width
+        spacing: Style.space(12)
+        visible: root.currentTab === "advanced"
+
+        SettingRow { label: "Enable automatic management"; widgetType: "toggle"; configKey: "enabled" }
+
+        PanelSeparator { foreground: root.bar ? root.bar.foreground : Color.foreground }
+
+        // Idle AC
+        PanelSectionHeader {
+          text: "SLEEP AFTER INACTIVITY (AC)"
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+        }
+        SettingRow { label: "Minutes before sleep"; widgetType: "number"; configKey: "idle.ac.sleepAfterMinutes" }
+        SettingRow { label: "Action on idle"; widgetType: "dropdown"; options: root.actionOptions; configKey: "idle.ac.afterSleep" }
+        SettingRow { label: "Hibernate after (min)"; widgetType: "number"; configKey: "idle.ac.hibernateAfterMinutes" }
+
+        PanelSeparator { foreground: root.bar ? root.bar.foreground : Color.foreground }
+
+        // Idle Battery High
+        PanelSectionHeader {
+          text: "SLEEP AFTER INACTIVITY (BATTERY HIGH)"
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+        }
+        SettingRow { label: "Minutes before sleep"; widgetType: "number"; configKey: "idle.batteryHigh.sleepAfterMinutes" }
+        SettingRow { label: "Action on idle"; widgetType: "dropdown"; options: root.actionOptions; configKey: "idle.batteryHigh.afterSleep" }
+        SettingRow { label: "Hibernate after (min)"; widgetType: "number"; configKey: "idle.batteryHigh.hibernateAfterMinutes" }
+
+        PanelSeparator { foreground: root.bar ? root.bar.foreground : Color.foreground }
+
+        // Idle Battery Low
+        PanelSectionHeader {
+          text: "SLEEP AFTER INACTIVITY (BATTERY LOW)"
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+        }
+        SettingRow { label: "Minutes before sleep"; widgetType: "number"; configKey: "idle.batteryLow.sleepAfterMinutes" }
+        SettingRow { label: "Action on idle"; widgetType: "dropdown"; options: root.actionOptions; configKey: "idle.batteryLow.afterSleep" }
+        SettingRow { label: "Hibernate after (min)"; widgetType: "number"; configKey: "idle.batteryLow.hibernateAfterMinutes" }
+
+        PanelSeparator { foreground: root.bar ? root.bar.foreground : Color.foreground }
+
+        // Lid
+        PanelSectionHeader {
+          text: "WHEN LAPTOP LID CLOSES"
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+        }
+        SettingRow { label: "Ignore lid close"; widgetType: "toggle"; configKey: "lid.ignoreLidClose" }
+        SettingRow { label: "On AC power"; widgetType: "dropdown"; options: root.actionOptions; configKey: "lid.ac.action" }
+        SettingRow { label: "Battery High"; widgetType: "dropdown"; options: root.actionOptions; configKey: "lid.batteryHigh.action" }
+        SettingRow { label: "Battery Low"; widgetType: "dropdown"; options: root.actionOptions; configKey: "lid.batteryLow.action" }
+
+        PanelSeparator { foreground: root.bar ? root.bar.foreground : Color.foreground }
+
+        Button {
+          width: parent.width
+          text: "Apply All Settings"
+          bordered: true
+          active: root.configDirty
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+          onClicked: { root.pendingWrite = Qt.btoa(JSON.stringify(root.editConfig, null, 2)); configWriteProc.running = true }
+        }
+      }
+
+      Item { width: 1; height: Style.space(4) }
+    }
+  }
+
+  // ── Reusable components ──
+  component InfoPair: Row {
+    property string label: ""
+    property string value: ""
+    width: parent ? parent.width : 0
+    spacing: Style.space(8)
+    Text {
+      text: parent.label
+      color: root.bar ? root.bar.foreground : Color.foreground
+      opacity: 0.6
+      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+      font.pixelSize: Style.font.bodySmall
+      width: parent.width * 0.45
+    }
+    Text {
+      text: parent.value
+      color: root.bar ? root.bar.foreground : Color.foreground
+      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+      font.pixelSize: Style.font.bodySmall
+      width: parent.width * 0.55 - parent.spacing
+      wrapMode: Text.Wrap
+    }
+  }
+
+  component SettingRow: Row {
+    property string label: ""
+    property string widgetType: "dropdown"
+    property var options: []
+    property string configKey: ""
+    width: parent ? parent.width : 0
+    spacing: Style.space(8)
+    Text {
+      text: parent.label
+      color: root.bar ? root.bar.foreground : Color.foreground
+      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+      font.pixelSize: Style.font.body
+      anchors.verticalCenter: parent.verticalCenter
+      width: parent.width * 0.6
+      wrapMode: Text.Wrap
+    }
+    Loader {
+      width: parent.width * 0.4 - parent.spacing
+      anchors.verticalCenter: parent.verticalCenter
+      sourceComponent: {
+        if (parent.widgetType === "toggle") return toggleComp
+        if (parent.widgetType === "number") return numberComp
+        return dropdownComp
+      }
+      property string _key: parent.configKey
+      property var _opts: parent.options
+    }
+  }
+
+  Component {
+    id: toggleComp
+    ToggleSwitch {
+      checked: ! !root.getVal(parent._key, false)
+      onToggled: { root.setVal(parent._key, !checked) }
+    }
+  }
+
+  Component {
+    id: numberComp
+    NumberField {
+      value: root.getVal(parent._key, 0)
+      onModified: function(val) { root.setVal(parent._key, val) }
+    }
+  }
+
+  Component {
+    id: dropdownComp
+    Dropdown {
+      options: parent._opts || []
+      value: String(root.getVal(parent._key, ""))
+      onChanged: function(val) { root.setVal(parent._key, val) }
     }
   }
 
