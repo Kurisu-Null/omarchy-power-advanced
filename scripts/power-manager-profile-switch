@@ -176,7 +176,7 @@ INI
         
     # SYNC OMARCHY SHELL IDLE TIMERS
     SHELL_CONF="$HOME/.config/omarchy/shell.json"
-    if [ -f "$SHELL_CONF" ] && [ "$(id -u)" -eq 0 ]; then
+    if [ "$(id -u)" -eq 0 ]; then
         ACTIVE_USER=$(who -u | awk '{print $1}' | head -n 1)
         if [ -n "$ACTIVE_USER" ]; then
             USER_HOME=$(getent passwd "$ACTIVE_USER" | cut -d: -f6)
@@ -188,7 +188,7 @@ INI
                 if [ "$SCR_SEC" -lt 30 ]; then SCR_SEC=30; fi
                 
                 # Use jq to update the idle config
-                sudo -u "$ACTIVE_USER" jq ".idle.screensaver = $SCR_SEC | .idle.lock = $LOCK_SEC" "$REAL_SHELL_CONF" > "${REAL_SHELL_CONF}.tmp" && sudo -u "$ACTIVE_USER" mv "${REAL_SHELL_CONF}.tmp" "$REAL_SHELL_CONF" || true
+                jq ".idle.screensaver = $SCR_SEC | .idle.lock = $LOCK_SEC" "$REAL_SHELL_CONF" > "${REAL_SHELL_CONF}.tmp" && chown "$ACTIVE_USER:" "${REAL_SHELL_CONF}.tmp" && mv "${REAL_SHELL_CONF}.tmp" "$REAL_SHELL_CONF" || true
             fi
         fi
     fi

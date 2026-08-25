@@ -549,7 +549,7 @@ Panel {
           active: root.configDirty
           foreground: root.bar ? root.bar.foreground : Color.foreground
           fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-          onClicked: { root.pendingWrite = Qt.btoa(JSON.stringify(root.editConfig, null, 2)); configWriteProc.running = true }
+          onClicked: { root.forceActiveFocus(); root.pendingWrite = Qt.btoa(JSON.stringify(root.editConfig, null, 2)); configWriteProc.running = true }
         }
       }
 
@@ -623,7 +623,7 @@ Panel {
           active: root.configDirty
           foreground: root.bar ? root.bar.foreground : Color.foreground
           fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-          onClicked: { root.pendingWrite = Qt.btoa(JSON.stringify(root.editConfig, null, 2)); configWriteProc.running = true }
+          onClicked: { root.forceActiveFocus(); root.pendingWrite = Qt.btoa(JSON.stringify(root.editConfig, null, 2)); configWriteProc.running = true }
         }
       }
 
@@ -828,6 +828,16 @@ Panel {
     NumberField {
       value: { var _ = root.editConfig; return root.getVal(parent._key, 0) }
       onModified: function(val) { root.setVal(parent._key, val) }
+      Component.onCompleted: {
+        if (field && field.contentItem) {
+          field.contentItem.onTextChanged.connect(function() {
+            var textVal = field.contentItem.text;
+            if (textVal === "" || textVal === "-") return;
+            var val = parseInt(textVal);
+            if (!isNaN(val)) root.setVal(parent._key, val);
+          })
+        }
+      }
     }
   }
 
