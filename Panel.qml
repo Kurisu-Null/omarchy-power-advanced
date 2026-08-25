@@ -9,6 +9,7 @@ import "Model.js" as Model
 
 Panel {
   id: root
+  signal refreshUi()
   implicitWidth: barBtn.implicitWidth
   implicitHeight: barBtn.implicitHeight
   moduleName: "onlyvishesh.power-manager"
@@ -183,7 +184,7 @@ Panel {
 
   Process {
     id: applyProc
-    command: ["pkexec", "/home/onlyvishesh/.config/omarchy/plugins/power-manager-git/scripts/power-manager-apply"]
+    command: ["pkexec", "/home/onlyvishesh/.config/omarchy/plugins/onlyvishesh.power-manager/scripts/power-manager-apply"]
     onExited: {
       diagnosticsProc.running = true
       profilesProc.running = true
@@ -244,7 +245,7 @@ Panel {
 
   Process {
     id: diagnosticsProc
-    command: ["/home/onlyvishesh/.config/omarchy/plugins/power-manager-git/scripts/power-manager-diagnostics", "--json"]
+    command: ["/home/onlyvishesh/.config/omarchy/plugins/onlyvishesh.power-manager/scripts/power-manager-diagnostics", "--json"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -300,18 +301,19 @@ Panel {
         fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
         fontSize: Style.font.bodySmall
         onChanged: function(v) { 
-          if (root.configDirty) {
-             root.editConfig = JSON.parse(JSON.stringify(root.config));
-          }
+          root.editConfig = JSON.parse(JSON.stringify(root.config));
+          root.refreshUi();
           root.currentTab = v; 
         }
       }
 
       // ═══════════ OVERVIEW TAB ═══════════
-      Column {
+      Loader {
         width: parent.width
-        spacing: Style.space(14)
-        visible: root.currentTab === "overview"
+        active: root.currentTab === "overview"
+        visible: active
+        sourceComponent: Column {
+          spacing: Style.space(14)
 
         // Hero
         PanelHero {
@@ -474,11 +476,15 @@ Panel {
         }
       }
 
+      }
+
       // ═══════════ PROFILES TAB ═══════════
-      Column {
+      Loader {
         width: parent.width
-        spacing: Style.space(14)
-        visible: root.currentTab === "profiles"
+        active: root.currentTab === "profiles"
+        visible: active
+        sourceComponent: Column {
+          spacing: Style.space(14)
 
         PanelSectionHeader {
           text: "ACTIVE PROFILE"
@@ -547,11 +553,15 @@ Panel {
         }
       }
 
+      }
+
       // ═══════════ ADVANCED TAB ═══════════
-      Column {
+      Loader {
         width: parent.width
-        spacing: Style.space(12)
-        visible: root.currentTab === "advanced"
+        active: root.currentTab === "advanced"
+        visible: active
+        sourceComponent: Column {
+          spacing: Style.space(12)
 
         SettingRow { label: "Enable automatic management"; widgetType: "toggle"; configKey: "enabled" }
 
@@ -617,11 +627,15 @@ Panel {
         }
       }
 
+      }
+
       // ═══════════ DIAGNOSTICS TAB ═══════════
-      Column {
+      Loader {
         width: parent.width
-        spacing: Style.space(12)
-        visible: root.currentTab === "diagnostics"
+        active: root.currentTab === "diagnostics"
+        visible: active
+        sourceComponent: Column {
+          spacing: Style.space(12)
 
         Component.onCompleted: if (root.currentTab === "diagnostics") diagnosticsProc.running = true
         Connections {
@@ -713,6 +727,8 @@ Panel {
     }
   }
 
+      }
+
   // ── Reusable components ──
   component InfoPair: Row {
     property string label: ""
@@ -802,7 +818,7 @@ Panel {
   Component {
     id: toggleComp
     ToggleSwitch {
-      checked: ! !root.getVal(parent._key, false)
+      checked: { var _ = root.editConfig; return ! !root.getVal(parent._key, false) }
       onToggled: { root.setVal(parent._key, !checked) }
     }
   }
@@ -810,7 +826,7 @@ Panel {
   Component {
     id: numberComp
     NumberField {
-      value: root.getVal(parent._key, 0)
+      value: { var _ = root.editConfig; return root.getVal(parent._key, 0) }
       onModified: function(val) { root.setVal(parent._key, val) }
     }
   }
@@ -819,7 +835,7 @@ Panel {
     id: dropdownComp
     Dropdown {
       options: parent._opts || []
-      value: String(root.getVal(parent._key, ""))
+      value: { var _ = root.editConfig; return String(root.getVal(parent._key, "")) }
       onChanged: function(val) { root.setVal(parent._key, val) }
     }
   }
@@ -830,7 +846,7 @@ Panel {
     anchorItem: barBtn
     owner: root
     bar: root.bar
-    open: root.opened && !root.openedFromMenu
+    open: root.opened
     contentWidth: popupPanel.fittedContentWidth(Style.space(480))
     contentHeight: popupPanel.fittedContentHeight(popupFlick.contentHeight + Style.space(32))
 
