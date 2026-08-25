@@ -116,6 +116,44 @@ Panel {
     if (!brightnessReadProc.running) brightnessReadProc.running = true
   }
 
+  // ── Native Idle Suspend ──
+  readonly property string currentStateKey: root.discharging ? (root.batteryFrac <= (root.getVal("batteryThreshold", 30)/100.0) ? "batteryLow" : "batteryHigh") : "ac"
+  readonly property int idleSleepMins: root.getVal("idle." + currentStateKey + ".sleepAfterMinutes", 0)
+  readonly property string idleAction: root.getVal("idle." + currentStateKey + ".afterSleep", "ignore")
+
+  Timer { running: !!root.bar; repeat: true; interval: 10000; onTriggered: console.log("IDLE DEBUG - State:", root.currentStateKey, "Mins:", root.idleSleepMins, "Action:", root.idleAction, "Enabled:", pluginIdleMonitor.enabled, "Timeout:", pluginIdleMonitor.timeout) }
+  IdleMonitor {
+    id: pluginIdleMonitor
+    // Only enable if we have a valid action, it's enabled in config, >0 mins, and we are the bar instance (singleton)
+    enabled: !!root.bar && root.getVal("enabled", true) && root.idleSleepMins > 0 && root.idleAction !== "ignore"
+    timeout: root.idleSleepMins * 60
+    respectInhibitors: true
+    onIsIdleChanged: {
+      console.log("IDLE FIRED! isIdle:", isIdle)
+      if (isIdle && enabled) {
+        var cmd = ""
+        if (root.idleAction === "suspend") cmd = "systemctl suspend"
+        else if (root.idleAction === "hibernate") cmd = "systemctl hibernate"
+        else if (root.idleAction === "suspend-then-hibernate") cmd = "systemctl suspend-then-hibernate"
+        else if (root.idleAction === "poweroff") cmd = "systemctl poweroff"
+        
+        if (cmd !== "") {
+          idleActionProc.command = ["bash", "-c", cmd]
+          idleActionProc.running = true
+        }
+      }
+    }
+  }
+
+  Process { id: idleActionProc }
+
+  // ── IPC handlers ──
+  IpcHandler {
+    target: "power-manager"
+    function open() { root.openedFromMenu = true; root.open() }
+    function toggle() { root.openedFromMenu = true; root.toggle() }
+  }
+
   // ── Processes ──
   Process {
     id: configReadProc
@@ -147,6 +185,7 @@ Panel {
     id: applyProc
     command: ["pkexec", "/home/onlyvishesh/.config/omarchy/plugins/power-manager-git/scripts/power-manager-apply"]
     onExited: {
+      diagnosticsProc.running = true
       profilesProc.running = true
     }
   }
@@ -201,6 +240,20 @@ Panel {
   Process {
     id: brightnessSetProc
     onExited: { if (!brightnessReadProc.running) brightnessReadProc.running = true }
+  }
+
+  Process {
+    id: diagnosticsProc
+    command: ["/home/onlyvishesh/.config/omarchy/plugins/power-manager-git/scripts/power-manager-diagnostics", "--json"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          var parsed = JSON.parse(text)
+          if (parsed && typeof parsed === 'object') root.diagnosticsData = parsed
+        } catch(e) {}
+      }
+    }
   }
 
   Timer {
@@ -564,6 +617,98 @@ Panel {
         }
       }
 
+      // ═══════════ DIAGNOSTICS TAB ═══════════
+      Column {
+        width: parent.width
+        spacing: Style.space(12)
+        visible: root.currentTab === "diagnostics"
+
+        Component.onCompleted: if (root.currentTab === "diagnostics") diagnosticsProc.running = true
+        Connections {
+          target: root
+          function onCurrentTabChanged() { if (root.currentTab === "diagnostics") diagnosticsProc.running = true }
+        }
+
+        PanelSectionHeader {
+          text: "HIBERNATION READINESS"
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+        }
+
+        Text {
+          text: Model.hibernationReady(root.diagnosticsData) ? "✓ READY" : "✗ NOT READY"
+          color: Model.hibernationReady(root.diagnosticsData)
+            ? (root.bar ? root.bar.foreground : Color.foreground)
+            : "#e06c75"
+          font.family: root.bar ? root.bar.fontFamily : Style.font.family
+          font.pixelSize: Style.font.title
+          font.bold: true
+        }
+
+        // Individual checks
+        DiagRow {
+          ok: !!(root.diagnosticsData.swap && root.diagnosticsData.swap.adequate_for_hibernate)
+          label: "Swap"
+          detail: (root.diagnosticsData.swap && root.diagnosticsData.swap.adequate_for_hibernate) ? "Adequate for hibernation" : "Not sufficient"
+        }
+        DiagRow {
+          ok: !!root.diagnosticsData.hibernate_available
+          label: "Hibernate service"
+          detail: root.diagnosticsData.hibernate_available ? "Available" : "Not available"
+        }
+        DiagRow {
+          ok: !!(root.diagnosticsData.resume && root.diagnosticsData.resume.kernel_cmdline_has_resume)
+          label: "Resume parameters"
+          detail: (root.diagnosticsData.resume && root.diagnosticsData.resume.kernel_cmdline_has_resume) ? "Configured" : "Missing in kernel cmdline"
+        }
+        DiagRow {
+          ok: !!(root.diagnosticsData.initramfs && root.diagnosticsData.initramfs.resume_hook_present)
+          label: "Initramfs resume hook"
+          detail: (root.diagnosticsData.initramfs && root.diagnosticsData.initramfs.resume_hook_present) ? "Present" : "Missing"
+        }
+        DiagRow {
+          ok: !!(root.diagnosticsData.initramfs && root.diagnosticsData.initramfs.hook_order_correct)
+          label: "Hook order"
+          detail: (root.diagnosticsData.initramfs && root.diagnosticsData.initramfs.hook_order_correct) ? "Correct" : "Incorrect"
+        }
+
+        PanelSeparator { foreground: root.bar ? root.bar.foreground : Color.foreground }
+
+        PanelSectionHeader {
+          text: "SLEEP STATES"
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+        }
+        DiagRow { ok: !!(root.diagnosticsData.sleep_states && root.diagnosticsData.sleep_states.freeze); label: "Freeze (S0)"; detail: "Idle standby" }
+        DiagRow { ok: !!(root.diagnosticsData.sleep_states && root.diagnosticsData.sleep_states.mem); label: "Suspend (S3)"; detail: "RAM powered" }
+        DiagRow { ok: !!(root.diagnosticsData.sleep_states && root.diagnosticsData.sleep_states.disk); label: "Hibernate (S4)"; detail: "Written to disk" }
+        DiagRow { ok: !!root.diagnosticsData.suspend_then_hibernate_available; label: "Suspend-then-hibernate"; detail: "Chained sleep" }
+
+        PanelSeparator { foreground: root.bar ? root.bar.foreground : Color.foreground }
+
+        PanelSectionHeader {
+          text: "SYSTEM INFO"
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+        }
+        InfoPair {
+          label: "Profile backend"
+          value: (root.diagnosticsData.power_profiles && root.diagnosticsData.power_profiles.backend) || "unknown"
+        }
+        InfoPair {
+          label: "Active profile"
+          value: (root.diagnosticsData.power_profiles && root.diagnosticsData.power_profiles.active) || "unknown"
+        }
+        InfoPair {
+          label: "Logind lid switch"
+          value: (root.diagnosticsData.logind && root.diagnosticsData.logind.handle_lid_switch) || "—"
+        }
+        InfoPair {
+          label: "Logind lid (AC)"
+          value: (root.diagnosticsData.logind && root.diagnosticsData.logind.handle_lid_switch_external_power) || "—"
+        }
+      }
+
       Item { width: 1; height: Style.space(4) }
     }
   }
@@ -589,6 +734,39 @@ Panel {
       font.pixelSize: Style.font.bodySmall
       width: parent.width * 0.55 - parent.spacing
       wrapMode: Text.Wrap
+    }
+  }
+
+  component DiagRow: Row {
+    property bool ok: false
+    property string label: ""
+    property string detail: ""
+    width: parent ? parent.width : 0
+    spacing: Style.space(8)
+    Text {
+      text: parent.ok ? "✓" : "✗"
+      color: parent.ok ? "#98c379" : "#e06c75"
+      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+      font.pixelSize: Style.font.body
+      width: Style.space(16)
+    }
+    Column {
+      width: parent.width - Style.space(24)
+      Text {
+        text: parent.parent.label
+        color: root.bar ? root.bar.foreground : Color.foreground
+        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+        font.pixelSize: Style.font.body
+        width: parent.width
+      }
+      Text {
+        text: parent.parent.detail
+        color: root.bar ? root.bar.foreground : Color.foreground
+        opacity: 0.6
+        font.family: root.bar ? root.bar.fontFamily : Style.font.family
+        font.pixelSize: Style.font.bodySmall
+        width: parent.width
+      }
     }
   }
 
