@@ -38,7 +38,7 @@ Panel {
   readonly property var upowerStates: ({ Charging: 1, Discharging: 2, FullyCharged: 4, PendingCharge: 3 })
   readonly property bool discharging: {
     var d = UPower.displayDevice
-    return ! (d && d.isPresent && UPower.onBattery)
+    return !!(d && d.isPresent && UPower.onBattery)
   }
   readonly property real batteryFrac: Model.batteryFraction(UPower.displayDevice)
   readonly property bool fullyCharged: {
@@ -122,28 +122,78 @@ Panel {
   readonly property int idleSleepMins: root.getVal("idle." + currentStateKey + ".sleepAfterMinutes", 0)
   readonly property string idleAction: root.getVal("idle." + currentStateKey + ".afterSleep", "ignore")
 
-  Timer { running: !!root.bar; repeat: true; interval: 10000; onTriggered: console.log("IDLE DEBUG - State:", root.currentStateKey, "Mins:", root.idleSleepMins, "Action:", root.idleAction, "Enabled:", pluginIdleMonitor.enabled, "Timeout:", pluginIdleMonitor.timeout) }
-  IdleMonitor {
-    id: pluginIdleMonitor
-    // Only enable if we have a valid action, it's enabled in config, >0 mins, and we are the bar instance (singleton)
-    enabled: !!root.bar && root.getVal("enabled", true) && root.idleSleepMins > 0 && root.idleAction !== "ignore"
-    timeout: root.idleSleepMins * 60
-    respectInhibitors: true
-    onIsIdleChanged: {
-      console.log("IDLE FIRED! isIdle:", isIdle)
-      if (isIdle && enabled) {
-        var cmd = ""
-        if (root.idleAction === "suspend") cmd = "systemctl suspend"
-        else if (root.idleAction === "hibernate") cmd = "systemctl hibernate"
-        else if (root.idleAction === "suspend-then-hibernate") cmd = "systemctl suspend-then-hibernate"
-        else if (root.idleAction === "poweroff") cmd = "systemctl poweroff"
-        
-        if (cmd !== "") {
-          idleActionProc.command = ["bash", "-c", cmd]
-          idleActionProc.running = true
+  property bool wasIdle: false
+  property int idleCountdown: 0
+  Process {
+    id: idleStatusProc
+    command: ["sh", "-c", "WAYLAND_DISPLAY= echo \"$(qs ipc --any-display -p /usr/share/omarchy/shell call idle status 2>/dev/null)\" \"|||\" \"$(qs ipc --any-display -p /usr/share/omarchy/shell call lock status 2>/dev/null)\""]
+    stdout: SplitParser {
+      onRead: function(line) {
+        var res = String(line).trim()
+        if (res !== "" && res.indexOf("|||") !== -1) {
+          try {
+            var parts = res.split("|||")
+            var idleSt = JSON.parse(parts[0].trim())
+            var lockSt = JSON.parse(parts[1].trim())
+            
+            var isSleepable = (idleSt.inIdleCycle === true || lockSt.locked === true);
+            var isTyping = (lockSt.locked === true && (lockSt.authenticating || lockSt.unlocking || lockSt.previewTyped > 0));
+            
+            if (isSleepable) {
+              if (!root.wasIdle) {
+                root.wasIdle = true
+                var elapsed = 0;
+                if (lockSt.locked) elapsed = idleSt.lock;
+                else if (idleSt.inIdleCycle) elapsed = idleSt.screensaver;
+                
+                root.idleCountdown = (root.idleSleepMins * 60) - elapsed;
+                
+                // CRITICAL: If they set sleep to 1 min (60s) and elapsed is 60s, it would be 0.
+                // Always ensure at least 60 seconds of countdown upon waking up so it doesn't loop.
+                if (root.idleCountdown < 60) root.idleCountdown = 60;
+                
+                console.log("IDLE: System is sleepable. Starting countdown:", root.idleCountdown)
+              } else {
+                if (isTyping) {
+                  root.idleCountdown = 60; // pause and give 60s to type password
+                } else {
+                  root.idleCountdown -= 5;
+                }
+                
+                if (root.idleCountdown <= 0) {
+                  console.log("IDLE: SLEEPING NOW!")
+                  var cmd = ""
+                  if (root.idleAction === "suspend") cmd = "systemctl suspend"
+                  else if (root.idleAction === "hibernate") cmd = "systemctl hibernate"
+                  else if (root.idleAction === "suspend-then-hibernate") cmd = "systemctl suspend-then-hibernate"
+                  else if (root.idleAction === "hybrid-sleep") cmd = "systemctl hybrid-sleep"
+                  else if (root.idleAction === "poweroff") cmd = "systemctl poweroff"
+                  if (cmd !== "") {
+                    console.log("IDLE EXECUTING:", cmd)
+                    idleActionProc.command = ["bash", "-c", cmd]
+                    idleActionProc.running = true
+                  }
+                  
+                  // Reset properly so it evaluates their custom timeout dynamically next time!
+                  root.wasIdle = false
+                }
+              }
+            } else {
+              if (root.wasIdle) console.log("IDLE: Canceled by user activity")
+              root.wasIdle = false
+            }
+          } catch(e) {}
         }
       }
     }
+  }
+
+  Timer {
+    id: pluginIdleTimer
+    running: !!root.bar && root.getVal("enabled", true) && root.idleSleepMins > 0 && root.idleAction !== "ignore"
+    repeat: true
+    interval: 5000
+    onTriggered: { idleStatusProc.running = true }
   }
 
   Process { id: idleActionProc }
