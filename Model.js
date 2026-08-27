@@ -39,6 +39,9 @@ function defaultConfig() {
       batteryHigh: { action: "suspend" },
       batteryLow: { action: "suspend" }
     },
+    appearance: {
+      showPercentage: true
+    },
     notifications: {
       profileChanges: true,
       thresholdCrossing: true,

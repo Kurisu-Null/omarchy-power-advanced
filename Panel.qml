@@ -325,13 +325,14 @@ Panel {
   ]
 
   // ── Bar button ──
-  BarIconButton {
+  WidgetButton {
     id: barBtn
     anchors.fill: parent
     bar: root.bar
-    slotSize: Style.bar.iconSlot * 2
-    text: (UPower.displayDevice.percentage * 100 > 0 ? Math.round(UPower.displayDevice.percentage * 100) + "% " : "") + Model.batteryIcon(UPower.displayDevice, UPower.onBattery, root.upowerStates) || "󰂄"
-    onPressed: { root.openedFromMenu = false; root.toggle() }
+    fontSize: Style.bar.iconFont
+    horizontalMargin: (root.config && root.config.appearance && root.config.appearance.showPercentage !== false) ? 6.0 : 8.5
+    text: ((root.config && root.config.appearance && root.config.appearance.showPercentage !== false && UPower.displayDevice.percentage * 100 > 0) ? Math.round(UPower.displayDevice.percentage * 100) + "% " : "") + (Model.batteryIcon(UPower.displayDevice, UPower.onBattery, root.upowerStates) || "󰂄")
+    onPressed: function(btn) { root.openedFromMenu = false; root.toggle() }
   }
 
   // ── Shared UI content ──
@@ -434,8 +435,36 @@ Panel {
             }
           }
         }
-
+        
         PanelSeparator { foreground: root.bar ? root.bar.foreground : Color.foreground }
+        
+        Row {
+          width: parent.width
+          spacing: Style.space(8)
+          Text {
+            text: "Show battery percentage in panel"
+            color: root.bar ? root.bar.foreground : Color.foreground
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.body
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width - batPctToggle.width - parent.spacing
+          }
+          ToggleSwitch {
+            id: batPctToggle
+            anchors.verticalCenter: parent.verticalCenter
+            checked: root.config.appearance && root.config.appearance.showPercentage !== false
+            onToggled: {
+              root.editConfig = JSON.parse(JSON.stringify(root.config));
+              if (!root.editConfig.appearance) root.editConfig.appearance = {};
+              root.editConfig.appearance.showPercentage = !checked;
+              root.config = JSON.parse(JSON.stringify(root.editConfig));
+              root.pendingWrite = Qt.btoa(JSON.stringify(root.editConfig, null, 2));
+              configWriteProc.running = true;
+            }
+          }
+        }
+        
+
 
         // Brightness
         Column {
@@ -485,8 +514,8 @@ Panel {
             }
           }
         }
+        
 
-        PanelSeparator { foreground: root.bar ? root.bar.foreground : Color.foreground }
 
         // Profile picker
         Column {
@@ -567,8 +596,8 @@ Panel {
             }
           }
         }
+        
 
-        PanelSeparator { foreground: root.bar ? root.bar.foreground : Color.foreground }
 
         PanelSectionHeader {
           text: "AUTOMATIC PROFILE RULES"
