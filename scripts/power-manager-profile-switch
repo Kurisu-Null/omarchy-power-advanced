@@ -144,7 +144,11 @@ if [ "$ENABLED" = "true" ]; then
         
         LID_IGN=$(jq -r 'if .lid?.ignoreLidClose == true then "true" else "false" end' "$CONFIG_FILE" 2>/dev/null || echo "false")
         LID_AC_ACT=$(jq -r '.lid?.ac?.action // "suspend"' "$CONFIG_FILE" 2>/dev/null || echo "suspend")
-        LID_BAT_ACT=$(jq -r '.lid?.battery?.action // "suspend"' "$CONFIG_FILE" 2>/dev/null || echo "suspend")
+        if [ "$STATE_KEY" = "batteryLow" ]; then
+            LID_BAT_ACT=$(jq -r '.lid?.batteryLow?.action // .lid?.battery?.action // "suspend"' "$CONFIG_FILE" 2>/dev/null || echo "suspend")
+        else
+            LID_BAT_ACT=$(jq -r '.lid?.batteryHigh?.action // .lid?.battery?.action // "suspend"' "$CONFIG_FILE" 2>/dev/null || echo "suspend")
+        fi
         
         if [ "$LID_IGN" = "true" ]; then
             LID_AC_ACT="ignore"
@@ -177,7 +181,7 @@ INI
     # SYNC OMARCHY SHELL IDLE TIMERS
     SHELL_CONF="$HOME/.config/omarchy/shell.json"
     if [ "$(id -u)" -eq 0 ]; then
-        ACTIVE_USER=$(who -u | awk '{print $1}' | head -n 1)
+        ACTIVE_USER=$(who -u 2>/dev/null | awk '{print $1}' | head -n 1 || true)
         if [ -n "$ACTIVE_USER" ]; then
             USER_HOME=$(getent passwd "$ACTIVE_USER" | cut -d: -f6)
             REAL_SHELL_CONF="$USER_HOME/.config/omarchy/shell.json"

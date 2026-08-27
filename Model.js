@@ -4,7 +4,7 @@ function defaultConfig() {
   return {
     version: 1,
     enabled: true,
-    batteryThreshold: 30,
+    batteryThreshold: 20,
     profiles: {
       ac: "performance",
       batteryHigh: "balanced",
@@ -14,37 +14,30 @@ function defaultConfig() {
       auto: false,
       ac: 80,
       batteryHigh: 50,
-      batteryLow: 20
+      batteryLow: 30
     },
     idle: {
       ac: {
-        sleepAfterMinutes: 15,
-        afterSleep: "suspend-then-hibernate",
-        hibernateAfterMinutes: 15
+        sleepAfterMinutes: 30,
+        afterSleep: "suspend",
+        hibernateAfterMinutes: 60
       },
       batteryHigh: {
-        sleepAfterMinutes: 10,
-        afterSleep: "hibernate",
-        hibernateAfterMinutes: 10
+        sleepAfterMinutes: 15,
+        afterSleep: "suspend",
+        hibernateAfterMinutes: 30
       },
       batteryLow: {
         sleepAfterMinutes: 5,
-        afterSleep: "hibernate",
-        hibernateAfterMinutes: 5
+        afterSleep: "suspend",
+        hibernateAfterMinutes: 15
       }
     },
     lid: {
-      ac: {
-        action: "suspend",
-        afterSuspend: "suspend-then-hibernate",
-        delayMinutes: 15
-      },
-      battery: {
-        action: "suspend",
-        afterSuspend: "hibernate",
-        delayMinutes: 10
-      },
-      ignoreLidClose: false
+      ignoreLidClose: false,
+      ac: { action: "suspend" },
+      batteryHigh: { action: "suspend" },
+      batteryLow: { action: "suspend" }
     },
     notifications: {
       profileChanges: true,
@@ -71,7 +64,6 @@ function deepMerge(target, source) {
       result[k] = target[k];
     }
   }
-  // Copy keys from source not in target
   var srcKeys = Object.keys(source);
   for (var j = 0; j < srcKeys.length; j++) {
     if (!target.hasOwnProperty(srcKeys[j])) {
@@ -113,12 +105,10 @@ function chargeThresholdActive(device, onBattery, states) {
 function batteryIcon(device, onBattery, states) {
   var d = device || {};
   if (!d.isPresent) return "";
-
   var chargingIcons = ["󰢜", "󰂆", "󰂇", "󰂈", "󰢝", "󰂉", "󰢞", "󰂊", "󰂋", "󰂅"];
   var defaultIcons = ["󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"];
   var index = Math.max(0, Math.min(9, Math.floor(batteryFraction(d) * 10)));
   var threshold = chargeThresholdActive(d, onBattery, states);
-
   if (threshold) return defaultIcons[index];
   if (d.state === states.FullyCharged) return "󰂅";
   if (!onBattery) return chargingIcons[index];
@@ -128,7 +118,6 @@ function batteryIcon(device, onBattery, states) {
 function modeLabel(device, onBattery, states) {
   var d = device || {};
   if (!d.isPresent) return "";
-
   var fraction = batteryFraction(d);
   if (chargeThresholdActive(d, onBattery, states)) return "Threshold";
   if (onBattery) return "On battery";

@@ -30,7 +30,8 @@ CONFIG_FILE="$HOME/.config/onlyvishesh.power-manager.json"
 
 if [ -f "$CONFIG_FILE" ]; then
     cat "$CONFIG_FILE" | jq -r '
-    "Automatic Management: \(.enabled)",
+    "Automatic Management : \(.enabled)",
+    "Low Battery Threshold: \(.batteryThreshold)%",
     "",
     "[ SLEEP ON AC ]",
     "  Mins to sleep : \(.idle.ac.sleepAfterMinutes)",

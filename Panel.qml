@@ -193,7 +193,7 @@ Panel {
     running: !!root.bar && root.getVal("enabled", true) && root.idleSleepMins > 0 && root.idleAction !== "ignore"
     repeat: true
     interval: 5000
-    onTriggered: { idleStatusProc.running = true }
+    onTriggered: { console.log("IDLE DEBUG - State:", root.currentStateKey, "Mins:", root.idleSleepMins, "Countdown:", root.idleCountdown); idleStatusProc.running = true }
   }
 
   Process { id: idleActionProc }
@@ -770,6 +770,23 @@ Panel {
         InfoPair {
           label: "Logind lid (AC)"
           value: (root.diagnosticsData.logind && root.diagnosticsData.logind.handle_lid_switch_external_power) || "—"
+        }
+        
+        PanelSeparator { foreground: root.bar ? root.bar.foreground : Color.foreground }
+        
+        Button {
+          width: parent.width
+          text: "Reset All Settings to Defaults"
+          bordered: true
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+          onClicked: {
+            root.forceActiveFocus();
+            root.editConfig = JSON.parse(JSON.stringify(Model.defaultConfig()));
+            root.refreshUi();
+            root.pendingWrite = Qt.btoa(JSON.stringify(root.editConfig, null, 2));
+            configWriteProc.running = true;
+          }
         }
       }
 
