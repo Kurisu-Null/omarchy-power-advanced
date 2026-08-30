@@ -9,14 +9,41 @@
 </div>
 
 <p align="center">
-  <img src="image-1.png" width="32%" alt="Overview Dashboard" />
-  <img src="image-2.png" width="32%" alt="Power Profiles" />
-  <img src="image-3.png" width="32%" alt="Advanced Settings" />
+  <img src="assets/banner.png" alt="OMarchy Power Manager Banner" width="100%" />
 </p>
 
-Welcome to **OMarchy Power Manager**, a powerful power manager and controller that entirely replaces the default power plugin. It is widely considered the best plugin for OMarchy when it comes to battery and system power management. If you are searching for the "top plugins for OMarchy" or "best OMarchy extensions", this is an essential addition to your setup.
+Welcome to **OMarchy Power Manager**, an advanced power management and controller plugin that expands OMarchy's default power capabilities with deep systemd integration, smart profiles, and hibernation support.
 
-Designed specifically for the OMarchy ecosystem, this plugin seamlessly bridges the gap between your desktop environment, Wayland idle tracking, and the Linux kernel's deep systemd power states.
+Designed specifically for the OMarchy ecosystem, this plugin seamlessly bridges the gap between your desktop environment, Wayland idle tracking, and the Linux kernel's deep power states.
+
+---
+
+## 📸 Interface Tour
+
+### 📊 Overview Dashboard
+Get real-time visibility into your battery metrics, charging status, power draw, and quickly toggle battery percentage visibility on your OMarchy top bar.
+
+<p align="center">
+  <img src="assets/overview.png" width="700" alt="Overview Dashboard" />
+</p>
+
+---
+
+### ⚡ Dynamic Power Profiles
+Fine-tune system behavior across **AC Power**, **Battery High**, and **Battery Low** states with custom low-battery thresholds, sleep actions, and idle timeouts.
+
+<p align="center">
+  <img src="assets/profile.png" width="700" alt="Power Profiles" />
+</p>
+
+---
+
+### 🛠️ Advanced Lid Rules & Diagnostics
+Configure hardware-aware lid-close actions with real-time `systemd-logind` syncing, inspect power capabilities, and run built-in diagnostics.
+
+<p align="center">
+  <img src="assets/advanced.png" width="700" alt="Advanced Settings" />
+</p>
 
 ---
 
