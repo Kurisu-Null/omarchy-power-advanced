@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "id": "onlyvishesh.power-manager",
-  "name": "OMarchy Power Manager",
-  "version": "1.0.0",
+  "name": "Omarchy Power Manager",
+  "version": "2.0.0",
   "author": "OnlyVishesh",
   "description": "Advanced power management with hibernation support, configurable profiles, idle behavior, and lid actions",
   "kinds": [
@@ -12,7 +12,7 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "OMarchy Power Manager",
+    "displayName": "Omarchy Power Manager",
     "description": "Advanced power management with hibernation diagnostics, configurable profiles, idle timers, and lid behavior",
     "category": "System",
     "allowMultiple": false
