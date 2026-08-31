@@ -63,6 +63,10 @@ Unlike generic power scripts, Omarchy Power Manager features **dynamic hardware 
 This plugin is available on the Omarchy Plugin Marketplace. Install it directly via the shell:
 ```bash
 omarchy plugin install onlyvishesh.power-manager
+```
+After installation, you **must** initialize the backend services to enable advanced power features (like charge limits and lid actions). Run the included installer script:
+```bash
+sudo ~/.config/omarchy/plugins/onlyvishesh.power-manager/extras/install.sh
 omarchy restart shell
 ```
 
@@ -71,7 +75,11 @@ Clone this repository directly into your Omarchy plugins directory:
 ```bash
 git clone https://github.com/onlyvishesh/omarchy-power-manager.git ~/.config/omarchy/plugins/onlyvishesh.power-manager
 ```
-After installing, restart your shell to apply the backend services:
+Next, install the secure backend services:
+```bash
+sudo ~/.config/omarchy/plugins/onlyvishesh.power-manager/extras/install.sh
+```
+Finally, restart your shell to apply the changes:
 ```bash
 omarchy restart shell
 ```

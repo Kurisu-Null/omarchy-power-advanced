@@ -1,0 +1,34 @@
+#!/bin/bash
+set -euo pipefail
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo '{"success": false, "errors": ["Must be run as root"]}'
+    exit 1
+fi
+
+LIMIT="${1:-}"
+SYS_PATH="${2:-}"
+TMPFILES_PATH="${3:-}"
+
+if [ -z "$LIMIT" ] || [ -z "$SYS_PATH" ] || [ -z "$TMPFILES_PATH" ]; then
+    echo '{"success": false, "errors": ["Missing arguments"]}'
+    exit 1
+fi
+
+if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
+    echo '{"success": false, "errors": ["Invalid limit format"]}'
+    exit 1
+fi
+
+# Apply immediately
+printf '%s\n' "$LIMIT" > "$SYS_PATH/charge_control_end_threshold" || true
+
+# Apply persistence rule
+if [ "$LIMIT" -eq 100 ]; then
+    rm -f "$TMPFILES_PATH"
+else
+    printf 'w %s/charge_control_end_threshold - - - - %s\n' "$SYS_PATH" "$LIMIT" > "$TMPFILES_PATH"
+fi
+
+echo '{"success": true}'
+exit 0

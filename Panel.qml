@@ -272,7 +272,7 @@ Panel {
   property string pendingWrite: ""
   Process {
     id: configWriteProc
-    command: ["bash", "-c", "echo '" + root.pendingWrite + "' | base64 -d > $HOME/.config/onlyvishesh.power-manager.json"]
+    command: ["sh", "-c", "echo \"$1\" | base64 -d > \"$HOME/.config/onlyvishesh.power-manager.json\"", "sh", root.pendingWrite]
     onExited: {
       root.config = JSON.parse(JSON.stringify(root.editConfig))
       applyProc.running = true
@@ -281,7 +281,7 @@ Panel {
 
   Process {
     id: applyProc
-    command: ["pkexec", "/home/onlyvishesh/.config/omarchy/plugins/onlyvishesh.power-manager/scripts/power-manager-apply"]
+    command: ["pkexec", "/usr/local/libexec/omarchy-power-manager/power-manager-apply"]
     onExited: function(code, status) {
       diagnosticsProc.running = true
       profilesProc.running = true
@@ -345,7 +345,7 @@ Panel {
 
   Process {
     id: diagnosticsProc
-    command: ["/home/onlyvishesh/.config/omarchy/plugins/onlyvishesh.power-manager/scripts/power-manager-diagnostics", "--json"]
+    command: ["bash", "-c", "\"$HOME/.config/omarchy/plugins/onlyvishesh.power-manager/scripts/power-manager-diagnostics\" --json"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {

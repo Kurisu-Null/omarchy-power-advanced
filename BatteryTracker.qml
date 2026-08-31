@@ -83,11 +83,7 @@ Item {
     if (!root.supported || !root.validPath(root.batteryPath) || applyProc.running) return
     root.applying = true
     applyProc.pct = pct
-    applyProc.command = ["pkexec", "sh", "-c",
-      "set -e; printf '%s\\n' \"$1\" > \"$2/charge_control_end_threshold\"; " +
-      "if [ \"$1\" -eq 100 ]; then rm -f \"$3\"; " +
-      "else printf 'w %s/charge_control_end_threshold - - - - %s\\n' \"$2\" \"$1\" > \"$3\"; fi",
-      "sh", String(pct), root.batteryPath, root.tmpfilesPath]
+    applyProc.command = ["pkexec", "/usr/local/libexec/omarchy-power-manager/power-manager-limit", String(pct), root.batteryPath, root.tmpfilesPath]
     console.log("Executing command:", applyProc.command)
     applyProc.running = true
   }
