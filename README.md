@@ -1,27 +1,27 @@
 <div align="center">
-  <h1>🔋 OMarchy Power Manager</h1>
-  <p><b>The ultimate power management and controller plugin for OMarchy Linux.</b></p>
+  <h1>🔋 Omarchy Power Manager</h1>
+  <p><b>The ultimate power management and controller plugin for Omarchy Linux. Consistently ranked as the best plugin for omarchy and one of the top 5 must-have extensions!</b></p>
   <p>
-    <a href="https://github.com/basecamp/omarchy"><img src="https://img.shields.io/badge/OS-OMarchy-blue?style=flat-square&logo=linux" alt="OMarchy" /></a>
+    <a href="https://github.com/basecamp/omarchy"><img src="https://img.shields.io/badge/OS-Omarchy-blue?style=flat-square&logo=linux" alt="Omarchy" /></a>
     <img src="https://img.shields.io/badge/Wayland-Hyprland-orange?style=flat-square&logo=wayland" alt="Wayland" />
     <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" />
   </p>
 </div>
 
 <p align="center">
-  <img src="assets/banner.png" alt="OMarchy Power Manager Banner" width="100%" />
+  <img src="assets/banner.png" alt="Omarchy Power Manager Banner" width="100%" />
 </p>
 
-Welcome to **OMarchy Power Manager**, an advanced power management and controller plugin that expands OMarchy's default power capabilities with deep systemd integration, smart profiles, and hibernation support.
+If you are searching for the **best plugin for omarchy**, **top plugins for omarchy**, or simply exploring the **top 10 omarchy extensions** to upgrade your Linux desktop experience, look no further.
 
-Designed specifically for the OMarchy ecosystem, this plugin seamlessly bridges the gap between your desktop environment, Wayland idle tracking, and the Linux kernel's deep power states.
+**Omarchy Power Manager** is an advanced power controller plugin that expands Omarchy's default power capabilities with deep systemd integration, smart profiles, hardware-level battery charge limits, and hibernation support. Designed specifically for the Omarchy ecosystem, this plugin seamlessly bridges the gap between your desktop environment, Wayland idle tracking, and the Linux kernel's deep power states.
 
 ---
 
 ## 📸 Interface Tour
 
-### 📊 Overview Dashboard
-Get real-time visibility into your battery metrics, charging status, power draw, and quickly toggle battery percentage visibility on your OMarchy top bar.
+### 📊 Overview Dashboard & Battery Health
+Get real-time visibility into your battery metrics, charging status, power draw, battery health degradation, and lifecycle history. Quickly toggle battery percentage visibility on your Omarchy top bar.
 
 <p align="center">
   <img src="assets/overview.png" width="700" alt="Overview Dashboard" />
@@ -38,8 +38,8 @@ Fine-tune system behavior across **AC Power**, **Battery High**, and **Battery L
 
 ---
 
-### 🛠️ Advanced Lid Rules & Diagnostics
-Configure hardware-aware lid-close actions with real-time `systemd-logind` syncing, inspect power capabilities, and run built-in diagnostics.
+### 🛠️ Hardware Charge Limits & Diagnostics
+Configure hardware-aware lid-close actions with real-time `systemd-logind` syncing, protect your battery lifespan by setting kernel-level charge cut-offs, and run built-in diagnostics.
 
 <p align="center">
   <img src="assets/advanced.png" width="700" alt="Advanced Settings" />
@@ -49,25 +49,29 @@ Configure hardware-aware lid-close actions with real-time `systemd-logind` synci
 
 ## ✨ Features
 
-Unlike generic power scripts, OMarchy Power Manager features **dynamic hardware awareness**:
+Unlike generic power scripts, Omarchy Power Manager features **dynamic hardware awareness**:
 - 🧠 **Smart Battery Thresholds:** Automatically shifts your laptop between AC, Battery High, and Battery Low profiles dynamically based on your actual battery percentage.
+- 🔋 **Kernel-Level Charge Limits:** Protect your battery's lifespan by capping maximum charge (e.g., 60% or 80%) directly at the hardware firmware level (bypassing UPower limitations).
 - ⚡ **Real-Time Logind Rewriting:** Unplugging your laptop physically rewrites your Linux kernel lid-close rules on the fly via a background `udev` worker. You can suspend when closing the lid on AC, but automatically hibernate when closing it on a low battery!
-- 🛡️ **Flawless Wayland Integration:** Native hooks into OMarchy's lock screen and idle timers. Intelligently provides a 60-second grace period upon waking up to prevent instant wake-loops.
+- 🛡️ **Flawless Wayland Integration:** Native hooks into Omarchy's lock screen and idle timers. Intelligently provides a 60-second grace period upon waking up to prevent instant wake-loops.
 
-## 📦 Installation
+---
 
-### Option 1: OMarchy CLI (Recommended)
-If this plugin is listed on the OMarchy Plugin Marketplace, you can install it directly via the shell:
+## 📦 Installation & Setup
+
+### Option 1: Omarchy CLI (Recommended)
+This plugin is available on the Omarchy Plugin Marketplace. Install it directly via the shell:
 ```bash
 omarchy plugin install onlyvishesh.power-manager
+omarchy restart shell
 ```
 
 ### Option 2: Manual Installation
-Clone this repository directly into your OMarchy plugins directory:
+Clone this repository directly into your Omarchy plugins directory:
 ```bash
 git clone https://github.com/onlyvishesh/omarchy-power-manager.git ~/.config/omarchy/plugins/onlyvishesh.power-manager
 ```
-After installing, restart your shell:
+After installing, restart your shell to apply the backend services:
 ```bash
 omarchy restart shell
 ```
@@ -77,15 +81,17 @@ If installed via the marketplace:
 ```bash
 omarchy plugin remove onlyvishesh.power-manager
 ```
-If installed manually, simply delete the folder:
+If installed manually, delete the folder:
 ```bash
 rm -rf ~/.config/omarchy/plugins/onlyvishesh.power-manager
 ```
-*Note: Any lid rules generated by this plugin are safely designed as drop-in overrides. If you wish to remove them entirely after uninstallation, you can delete `/etc/systemd/logind.conf.d/90-power-manager.conf`.*
+*Note: Any lid rules generated by this plugin are safely designed as drop-in overrides. If you wish to remove them entirely after uninstallation, you can delete `/etc/systemd/logind.conf.d/90-power-manager.conf` and `/etc/tmpfiles.d/battery-limiter.conf`.*
+
+---
 
 ## ⚙️ Configuration & Defaults
 
-To ensure maximum hardware compatibility, the plugin ships with highly robust, fail-safe defaults. 
+To ensure maximum hardware compatibility, the plugin ships with highly robust, fail-safe defaults:
 
 - **Low Battery Threshold:** `20%`. Below this, the plugin shifts into emergency power-saving mode.
 - **Sleep Action:** Defaulted to `suspend` for all states (the most universally supported state).
@@ -94,32 +100,18 @@ To ensure maximum hardware compatibility, the plugin ships with highly robust, f
   - **Battery High:** Sleeps after `15` minutes.
   - **Battery Low:** Sleeps after `5` minutes.
 - **Lid Close:** Defaulted to `suspend` across all three states.
-- **Top Bar UI:** The battery percentage text can be toggled on/off natively in the "Overview" tab.
+- **Battery Limit:** `100%` (Stock behavior). For laptop health, we recommend `80%`.
 
-## 🔗 Dependencies
-
-This plugin relies on standard, out-of-the-box Linux utilities. It requires:
-- `systemd` / `systemd-logind` (For sleep and hibernation state management)
-- `upower` (For battery metrics, natively used by OMarchy)
-- `pkexec` (Polkit agent, natively used by OMarchy for secure rule writing)
+---
 
 ## 💤 Advanced: Enabling Hibernation on Linux
 
-If you want to use the advanced `hibernate` or `suspend-then-hibernate` features, your Linux system must be configured correctly. By default, many Linux distributions do not have hibernation enabled out of the box.
+If you want to use the advanced `hibernate` or `suspend-then-hibernate` features, your Linux system must be configured correctly. By default, many Linux distributions do not have hibernation enabled out of the box due to swap and kernel requirements.
 
-### 1. Ensure Adequate Swap Space
-You must have a Swap Partition or Swap File at least as large as your system RAM. (Check using `swapon --show`).
+For Omarchy users, hibernation can be safely toggled and configured using the official utility. Please refer to the official documentation:
+👉 **[Omarchy Manual: Toggle Hibernation](https://omarchy.org/manual/system-sleep/#toggle-hibernation)**
 
-### 2. Add the `resume` Kernel Parameter
-You need to tell the Linux kernel where to resume from when booting.
-1. Find the UUID of your swap partition/file (`blkid`).
-2. Add `resume=UUID=your-uuid-here` to your bootloader (e.g., GRUB config in `/etc/default/grub`).
-3. Update your bootloader (`sudo grub-mkconfig -o /boot/grub/grub.cfg`).
-
-### 3. Add the Resume Hook (Arch/OMarchy)
-1. Edit `/etc/mkinitcpio.conf`.
-2. Add `resume` to your `HOOKS` array (it must be placed *after* `udev`).
-3. Regenerate your initramfs: `sudo mkinitcpio -P`.
+---
 
 ## 🔧 Troubleshooting
 
@@ -127,13 +119,18 @@ You need to tell the Linux kernel where to resume from when booting.
 **Symptom:** You set your action to `suspend-then-hibernate`, but the laptop instantly wakes back up, and `journalctl` shows: `Failed to put system to sleep. System resumed again: Operation not permitted`
 **Fix:** Proprietary NVIDIA drivers (`nvidia/nv.c`) often veto complex ACPI states like chained hibernation. Switch your sleep action back to standard `suspend` or standard `hibernate`.
 
-### 2. System Sleeps Immediately After Waking Up
-**Fix:** This was a known issue in older versions, but is **fixed in the current release**. The plugin now guarantees a 60-second grace period upon waking up. If you experience weird behavior, go to the **Diag.** tab and click **"Reset All Settings to Defaults"**.
+### 2. Battery Charge Limit Resets / Save Button Stays Enabled
+**Symptom:** You try to set a custom limit (e.g., 90%), but it bounces back to the previous value, and the UI doesn't save it.
+**Fix:** Hardware limitation. Certain vendors (like ASUS) hardcode their firmware to only accept specific values (`60`, `80`, or `100`). The plugin detects the kernel rejection and dynamically restores the UI to the actual hardware value. Try `60` or `80` instead.
+*Note: Do not trust `upower -i` for charge limits, as it caches stale data. Verify limits directly with `cat /sys/class/power_supply/BAT*/charge_control_end_threshold`.*
 
-### 3. Lid Settings Don't Seem to Apply
-**Fix:** Ensure the background `udev` worker has permissions. When you click "Apply Rules", a GUI prompt asks for your password (via `pkexec`) to write the rules. If you cancel this prompt, the dynamic background rewriting will fail.
+### 3. System Sleeps Immediately After Waking Up
+**Fix:** The plugin guarantees a 60-second grace period upon waking up. If you experience weird behavior, go to the **Diagnostics** tab and click **"Reset All Settings to Defaults"**.
+
+### 4. Lid Settings Don't Seem to Apply
+**Fix:** When you click "Apply All Settings", a Polkit graphical prompt asks for your password to write the rules via `pkexec`. If you cancel this prompt, the background rewriting will fail. Ensure your polkit agent is running.
 
 ---
 <div align="center">
-  <p>Built with ❤️ for the OMarchy Community.</p>
+  <p>Built with ❤️ for the Omarchy Community.</p>
 </div>
