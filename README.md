@@ -124,7 +124,7 @@ Unlike generic power scripts, Power Advanced features **dynamic hardware awarene
 
 ### Option 1: `omarchy plugin add` (Recommended)
 ```bash
-omarchy plugin add https://github.com/Kurisu-Null/omarchy-power-manager.git --enable
+omarchy plugin add https://github.com/Kurisu-Null/omarchy-power-advanced.git --enable
 ```
 This is the supported path: Omarchy clones the repo, runs `omarchy plugin validate` on it and refuses anything malformed, installs it to `~/.config/omarchy/plugins/<manifest id>`, and offers to place the widget in your bar. It also makes `omarchy plugin update` work later.
 
@@ -137,7 +137,7 @@ omarchy restart shell
 ### Option 2: Manual clone
 The install directory name **must** match the `id` in `manifest.json`, or the shell will not find the plugin:
 ```bash
-git clone https://github.com/Kurisu-Null/omarchy-power-manager.git \
+git clone https://github.com/Kurisu-Null/omarchy-power-advanced.git \
   ~/.config/omarchy/plugins/kurisu-null.power-advanced
 sudo ~/.config/omarchy/plugins/kurisu-null.power-advanced/extras/install.sh
 omarchy restart shell
