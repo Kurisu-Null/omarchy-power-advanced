@@ -36,7 +36,7 @@ fi
 
 CONFIG_FILE="${OMARCHY_POWER_CONF:-}"
 if [ -z "$CONFIG_FILE" ]; then
-    for cand in "${XDG_CONFIG_HOME:-$HOME/.config}/onlyvishesh.power-manager.json" "${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/power-manager.json" "$HOME/.config/onlyvishesh.power-manager.json"; do
+    for cand in "${XDG_CONFIG_HOME:-$HOME/.config}/kurisu-null.power-manager.json" "${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/power-manager.json" "$HOME/.config/kurisu-null.power-manager.json"; do
         if [ -f "$cand" ]; then CONFIG_FILE="$cand"; break; fi
     done
 fi

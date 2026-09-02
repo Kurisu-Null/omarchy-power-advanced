@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "id": "onlyvishesh.power-manager",
+  "id": "kurisu-null.power-manager",
   "name": "Omarchy Power Manager",
-  "version": "2.0.0",
-  "author": "OnlyVishesh",
-  "description": "Advanced power management with hibernation support, configurable profiles, idle behavior, and lid actions",
+  "version": "3.0.0",
+  "author": "Kurisu-Null",
+  "description": "Battery health, charge limits, power profiles, and per-power-state sleep and lid rules in a native Omarchy panel",
   "kinds": [
     "bar-widget"
   ],
@@ -13,9 +13,22 @@
   },
   "barWidget": {
     "displayName": "Omarchy Power Manager",
-    "description": "Advanced power management with hibernation diagnostics, configurable profiles, idle timers, and lid behavior",
+    "description": "One bar icon and one panel: battery health and cycles, firmware charge limit, power profile, and one ruleset per power state for sleep, hibernate, and lid behavior.",
     "category": "System",
-    "allowMultiple": false
+    "allowMultiple": false,
+    "defaultSection": "right"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "homepage": "https://github.com/Kurisu-Null/omarchy-power-manager",
+  "repository": "https://github.com/Kurisu-Null/omarchy-power-manager",
+  "keywords": [
+    "power",
+    "battery",
+    "charge-limit",
+    "hibernate",
+    "suspend",
+    "lid",
+    "power-profiles",
+    "bar-widget"
+  ]
 }

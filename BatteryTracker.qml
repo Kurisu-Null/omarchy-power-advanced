@@ -25,7 +25,7 @@ Item {
   property string lastLogDate: ""
   property var healthHistory: []
 
-  readonly property string stateDir: Quickshell.env("HOME") + "/.local/state/omarchy/onlyvishesh.power-manager"
+  readonly property string stateDir: Quickshell.env("HOME") + "/.local/state/omarchy/kurisu-null.power-manager"
   readonly property string healthLog: stateDir + "/health-log.tsv"
 
   function refresh() { if (!probe.running) probe.running = true }

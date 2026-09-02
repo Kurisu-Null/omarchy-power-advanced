@@ -14,7 +14,12 @@ function defaultConfig() {
       auto: false,
       ac: 80,
       batteryHigh: 50,
-      batteryLow: 30
+      batteryLow: 30,
+      // Plugins that already own screen brightness. While any of these is in
+      // the bar (or in shell.json's plugins[]), this plugin hides its own
+      // brightness controls. Exact ids or `*.suffix` wildcards; [] disables
+      // the behavior entirely. See "Display-plugin detection" below.
+      deferToPlugins: ["omarchy.monitor", "*.hyprmoncfg"]
     },
     idle: {
       ac: {
@@ -43,9 +48,9 @@ function defaultConfig() {
       showPercentage: true
     },
     notifications: {
-      profileChanges: true,
-      thresholdCrossing: true,
-      hibernationWarning: true
+      // Fired by the panel when the battery falls past batteryThreshold.
+      // The other keys that used to live here were never read by anything.
+      thresholdCrossing: true
     }
   };
 }
@@ -201,4 +206,153 @@ function hibernationIssues(diag) {
   if (!initramfs.resume_hook_present) issues.push("Resume hook not in initramfs");
   if (!initramfs.hook_order_correct) issues.push("Initramfs hook order incorrect");
   return issues;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UI vocabulary
+//
+// The panel renders option lists straight from here so labels stay consistent
+// between the Rules form, the tooltips, and any future surface. Values are the
+// literal strings the backend scripts and systemd expect — only the labels are
+// ours to prettify.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function actionOptions() {
+  return [
+    { value: "ignore", label: "Do nothing" },
+    { value: "suspend", label: "Suspend" },
+    { value: "hybrid-sleep", label: "Hybrid sleep" },
+    { value: "hibernate", label: "Hibernate" },
+    { value: "suspend-then-hibernate", label: "Suspend → hibernate" },
+    { value: "poweroff", label: "Power off" }
+  ];
+}
+
+function profileOptions() {
+  return [
+    { value: "power-saver", label: "Power saver" },
+    { value: "balanced", label: "Balanced" },
+    { value: "performance", label: "Performance" }
+  ];
+}
+
+function profileLabel(name) {
+  var s = String(name || "");
+  if (s === "") return "";
+  return s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, " ");
+}
+
+// The three power states the backend switches between, in the order the state
+// picker shows them. `key` indexes into config.profiles / config.idle / config.lid.
+function powerStates() {
+  return [
+    { key: "ac", label: "AC", icon: "󰚥" },
+    { key: "batteryHigh", label: "Battery", icon: "󰁹" },
+    { key: "batteryLow", label: "Low", icon: "󰁻" }
+  ];
+}
+
+function stateLabel(key) {
+  var states = powerStates();
+  for (var i = 0; i < states.length; i++) {
+    if (states[i].key === key) return states[i].label;
+  }
+  return key;
+}
+
+// Which state the machine is in right now, given live UPower readings and the
+// configured low-battery threshold. Mirrors power-manager-profile-switch.
+function currentStateKey(onBattery, fraction, thresholdPercent) {
+  if (!onBattery) return "ac";
+  var threshold = (Number(thresholdPercent) || 0) / 100.0;
+  return fraction <= threshold ? "batteryLow" : "batteryHigh";
+}
+
+// Charge cut-offs offered as pills. 100 means "no limit" — the value the
+// kernel wants when the limit is removed.
+function chargeLimitOptions() {
+  return [100, 60, 70, 80, 90];
+}
+
+function chargeLimitLabel(pct) {
+  return pct >= 100 ? "Off" : pct + "%";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Display-plugin detection
+//
+// Some plugins already own screen brightness — Omarchy's own display panel,
+// hyprmoncfg. When one of them is present this plugin hides its brightness
+// controls rather than shipping a second, competing slider.
+//
+// Which plugins count is config, not code: `brightness.deferToPlugins` in
+// ~/.config/kurisu-null.power-manager.json holds the patterns. Each entry is
+// either an exact plugin id ("omarchy.monitor") or a `*.suffix` wildcard
+// ("*.hyprmoncfg") that also catches local clones and forks. An empty array
+// switches the whole behavior off and the brightness controls always show.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function defaultDisplayPlugins() {
+  return ["omarchy.monitor", "*.hyprmoncfg"];
+}
+
+// Omarchy suffixes cloned widget instances with "@<n>"; match on the base id.
+function canonicalPluginId(id) {
+  return String(id === null || id === undefined ? "" : id).replace(/@.*$/, "").trim();
+}
+
+function matchesPluginPattern(id, pattern) {
+  var key = canonicalPluginId(id);
+  var pat = String(pattern || "").trim();
+  if (key === "" || pat === "") return false;
+  if (pat.indexOf("*.") === 0) {
+    var suffix = pat.slice(1); // keep the dot: "*.hyprmoncfg" -> ".hyprmoncfg"
+    return key.length > suffix.length && key.slice(-suffix.length) === suffix;
+  }
+  return key === pat;
+}
+
+// Every plugin id referenced by a parsed shell.json — bar layout entries in any
+// section, plus top-level plugins[]. Entries may be objects or bare strings.
+function shellEntryIds(shellConfig) {
+  var ids = [];
+  if (!shellConfig || typeof shellConfig !== 'object') return ids;
+
+  function push(entry) {
+    var id = canonicalPluginId(entry && typeof entry === 'object' ? entry.id : entry);
+    if (id !== "" && ids.indexOf(id) === -1) ids.push(id);
+  }
+
+  var layout = shellConfig.bar && shellConfig.bar.layout ? shellConfig.bar.layout : {};
+  var sections = ["left", "center", "right"];
+  for (var s = 0; s < sections.length; s++) {
+    var entries = layout[sections[s]];
+    if (!Array.isArray(entries)) continue;
+    for (var i = 0; i < entries.length; i++) push(entries[i]);
+  }
+  if (Array.isArray(shellConfig.plugins)) {
+    for (var j = 0; j < shellConfig.plugins.length; j++) push(shellConfig.plugins[j]);
+  }
+  return ids;
+}
+
+// The first present plugin that matches a configured pattern, or "" if none do.
+// Returning the id rather than a bool lets the System tab name who took over.
+function matchingDisplayPlugin(entryIds, patterns) {
+  if (!Array.isArray(entryIds) || !Array.isArray(patterns)) return "";
+  for (var i = 0; i < entryIds.length; i++) {
+    for (var j = 0; j < patterns.length; j++) {
+      if (matchesPluginPattern(entryIds[i], patterns[j])) return entryIds[i];
+    }
+  }
+  return "";
+}
+
+// Read the pattern list out of a merged plugin config, falling back to the
+// defaults if the key is missing or has been replaced by something non-array.
+function deferToPlugins(config) {
+  var brightness = config && typeof config === 'object' ? config.brightness : null;
+  var list = brightness ? brightness.deferToPlugins : null;
+  if (!Array.isArray(list)) return defaultDisplayPlugins();
+  return list;
 }

@@ -6,10 +6,14 @@ export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 CONFIG_FILE="${OMARCHY_POWER_CONF:-${1:-}}"
 if [ -z "$CONFIG_FILE" ]; then
     CANDIDATES=()
-    if [ -n "${XDG_CONFIG_HOME:-}" ]; then CANDIDATES+=("$XDG_CONFIG_HOME/onlyvishesh.power-manager.json"); fi
-    if [ -n "${HOME:-}" ]; then CANDIDATES+=("$HOME/.config/onlyvishesh.power-manager.json"); fi
-    for u_home in /home/*; do
-        if [ -d "$u_home/.config" ]; then CANDIDATES+=("$u_home/.config/onlyvishesh.power-manager.json"); fi
+    # Current name first in every location, then the upstream name this plugin
+    # was forked from, so an existing onlyvishesh config keeps working.
+    for conf_name in kurisu-null.power-manager.json onlyvishesh.power-manager.json; do
+        if [ -n "${XDG_CONFIG_HOME:-}" ]; then CANDIDATES+=("$XDG_CONFIG_HOME/$conf_name"); fi
+        if [ -n "${HOME:-}" ]; then CANDIDATES+=("$HOME/.config/$conf_name"); fi
+        for u_home in /home/*; do
+            if [ -d "$u_home/.config" ]; then CANDIDATES+=("$u_home/.config/$conf_name"); fi
+        done
     done
     for cand in "${CANDIDATES[@]}"; do
         if [ -f "$cand" ]; then CONFIG_FILE="$cand"; break; fi

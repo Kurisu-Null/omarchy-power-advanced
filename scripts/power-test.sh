@@ -26,7 +26,7 @@ fi
 
 echo ""
 echo "--- CURRENT ADVANCED SETTINGS ---"
-CONFIG_FILE="$HOME/.config/onlyvishesh.power-manager.json"
+CONFIG_FILE="$HOME/.config/kurisu-null.power-manager.json"
 
 if [ -f "$CONFIG_FILE" ]; then
     cat "$CONFIG_FILE" | jq -r '
