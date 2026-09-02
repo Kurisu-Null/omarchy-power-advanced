@@ -20,12 +20,12 @@ Item {
   signal limitSyncRequired(int limit)
   property bool applying: false
   property bool justApplied: false
-  readonly property string tmpfilesPath: "/etc/tmpfiles.d/battery-limiter.conf"
+  readonly property string tmpfilesPath: "/etc/tmpfiles.d/90-power-advanced-limit.conf"
 
   property string lastLogDate: ""
   property var healthHistory: []
 
-  readonly property string stateDir: Quickshell.env("HOME") + "/.local/state/omarchy/onlyvishesh.power-manager"
+  readonly property string stateDir: Quickshell.env("HOME") + "/.local/state/omarchy/kurisu-null.power-advanced"
   readonly property string healthLog: stateDir + "/health-log.tsv"
 
   function refresh() { if (!probe.running) probe.running = true }
@@ -83,7 +83,7 @@ Item {
     if (!root.supported || !root.validPath(root.batteryPath) || applyProc.running) return
     root.applying = true
     applyProc.pct = pct
-    applyProc.command = ["pkexec", "/usr/local/libexec/omarchy-power-manager/power-manager-limit", String(pct), root.batteryPath, root.tmpfilesPath]
+    applyProc.command = ["pkexec", "/usr/local/libexec/omarchy-power-advanced/power-manager-limit", String(pct), root.batteryPath, root.tmpfilesPath]
     console.log("Executing command:", applyProc.command)
     applyProc.running = true
   }

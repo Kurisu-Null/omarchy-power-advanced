@@ -6,10 +6,14 @@ export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 CONFIG_FILE="${OMARCHY_POWER_CONF:-${1:-}}"
 if [ -z "$CONFIG_FILE" ]; then
     CANDIDATES=()
-    if [ -n "${XDG_CONFIG_HOME:-}" ]; then CANDIDATES+=("$XDG_CONFIG_HOME/onlyvishesh.power-manager.json"); fi
-    if [ -n "${HOME:-}" ]; then CANDIDATES+=("$HOME/.config/onlyvishesh.power-manager.json"); fi
-    for u_home in /home/*; do
-        if [ -d "$u_home/.config" ]; then CANDIDATES+=("$u_home/.config/onlyvishesh.power-manager.json"); fi
+    # Current name first in every location, then the upstream name this plugin
+    # was forked from, so an existing onlyvishesh config keeps working.
+    for conf_name in kurisu-null.power-advanced.json onlyvishesh.power-manager.json; do
+        if [ -n "${XDG_CONFIG_HOME:-}" ]; then CANDIDATES+=("$XDG_CONFIG_HOME/$conf_name"); fi
+        if [ -n "${HOME:-}" ]; then CANDIDATES+=("$HOME/.config/$conf_name"); fi
+        for u_home in /home/*; do
+            if [ -d "$u_home/.config" ]; then CANDIDATES+=("$u_home/.config/$conf_name"); fi
+        done
     done
     for cand in "${CANDIDATES[@]}"; do
         if [ -f "$cand" ]; then CONFIG_FILE="$cand"; break; fi
@@ -134,8 +138,6 @@ if [ "$ENABLED" = "true" ]; then
     # DYNAMIC LOGIND CONFIGURATION
     if [ "$(id -u)" -eq 0 ] || [ -n "${OMARCHY_SYSTEMD_LOGIND_DIR:-}" ] || [ -n "${OMARCHY_SYSTEMD_SLEEP_DIR:-}" ]; then
         # Parse configs
-        IDLE_MINS=$(jq -r ".idle?.${STATE_KEY}?.sleepAfterMinutes // 15" "$CONFIG_FILE" 2>/dev/null || echo 15)
-        IDLE_ACT=$(jq -r ".idle?.${STATE_KEY}?.afterSleep // \"suspend\"" "$CONFIG_FILE" 2>/dev/null || echo "suspend")
         
         HIB_AC_MINS=$(jq -r '.idle?.ac?.hibernateAfterMinutes // 15' "$CONFIG_FILE" 2>/dev/null || echo 15)
         HIB_BAT_MINS=$(jq -r '.idle?.batteryHigh?.hibernateAfterMinutes // .idle?.batteryLow?.hibernateAfterMinutes // 15' "$CONFIG_FILE" 2>/dev/null || echo 15)
@@ -155,47 +157,49 @@ if [ "$ENABLED" = "true" ]; then
             LID_BAT_ACT="ignore"
         fi
         
-        IDLE_SEC=$((IDLE_MINS * 60))
         HIB_SEC=$((HIB_MINS * 60))
         
         LOGIND_DIR="${OMARCHY_SYSTEMD_LOGIND_DIR:-/etc/systemd/logind.conf.d}"
         SLEEP_DIR="${OMARCHY_SYSTEMD_SLEEP_DIR:-/etc/systemd/sleep.conf.d}"
         mkdir -p "$LOGIND_DIR" "$SLEEP_DIR" 2>/dev/null || true
         
-        cat <<INI > "$LOGIND_DIR/90-power-manager.conf"
+        # Lid handling only. IdleAction/IdleActionSec are deliberately not
+        # written: logind decides a session is idle from IdleHint, which nothing
+        # sets under Hyprland, so they would never fire. Idle sleep is handled in
+        # the panel by Wayland's idle-notify protocol instead. Lid events do not
+        # go through IdleHint, so these lines are the real mechanism.
+        cat <<INI > "$LOGIND_DIR/90-power-advanced.conf"
 [Login]
 HandleLidSwitch=$LID_BAT_ACT
 HandleLidSwitchExternalPower=$LID_AC_ACT
 HandleLidSwitchDocked=ignore
-IdleAction=$IDLE_ACT
-IdleActionSec=$IDLE_SEC
 INI
         
-        cat <<INI > "$SLEEP_DIR/90-power-manager.conf"
+        cat <<INI > "$SLEEP_DIR/90-power-advanced.conf"
 [Sleep]
 HibernateDelaySec=$HIB_SEC
 SuspendEstimationSec=3600
 INI
         
         
-    # SYNC OMARCHY SHELL IDLE TIMERS
-    SHELL_CONF="$HOME/.config/omarchy/shell.json"
-    if [ "$(id -u)" -eq 0 ]; then
-        ACTIVE_USER=$(who -u 2>/dev/null | awk '{print $1}' | head -n 1 || true)
-        if [ -n "$ACTIVE_USER" ]; then
-            USER_HOME=$(getent passwd "$ACTIVE_USER" | cut -d: -f6)
-            REAL_SHELL_CONF="$USER_HOME/.config/omarchy/shell.json"
-            if [ -f "$REAL_SHELL_CONF" ] && [ "$IDLE_MINS" -gt 0 ]; then
-                LOCK_SEC=$((IDLE_MINS * 60))
-                # Screensaver starts 30 seconds before sleep/lock
-                SCR_SEC=$((LOCK_SEC - 30))
-                if [ "$SCR_SEC" -lt 30 ]; then SCR_SEC=30; fi
-                
-                # Use jq to update the idle config
-                jq ".idle.screensaver = $SCR_SEC | .idle.lock = $LOCK_SEC" "$REAL_SHELL_CONF" > "${REAL_SHELL_CONF}.tmp" && chown "$ACTIVE_USER:" "${REAL_SHELL_CONF}.tmp" && mv "${REAL_SHELL_CONF}.tmp" "$REAL_SHELL_CONF" || true
-            fi
-        fi
-    fi
+    # Omarchy's screensaver and lock timers are deliberately left alone.
+    #
+    # Earlier versions rewrote ~/.config/omarchy/shell.json here to force
+    # idle.lock to equal this plugin's sleep timeout, with the screensaver 30s
+    # ahead of it. The intent was to lock before sleeping and to make the
+    # panel's idle worker start counting in time. Both were wrong to do this
+    # way: lock is a security policy and sleep is a power policy, so equating
+    # them silently *lengthens* the lock timeout whenever the sleep timeout is
+    # long (a 30 minute sleep rule pushed a 5 minute lock out to 30 minutes).
+    # It also ran as root on every AC plug/unplug via the udev rule, so a
+    # setting the user had chosen in Omarchy's own settings kept coming back
+    # changed with no prompt.
+    #
+    # The idle worker does not need it: it computes its countdown as
+    # sleepAfterMinutes*60 minus the time the shell has already been idle, so
+    # it stays correct as long as the shell's screensaver fires before the
+    # sleep timeout, and it clamps when it does not. Screensaver and lock
+    # timing belong to Omarchy's idle settings.
 
         systemctl kill -s HUP systemd-logind 2>/dev/null || true
     fi

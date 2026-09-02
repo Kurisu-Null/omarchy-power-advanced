@@ -6,7 +6,7 @@
   <vendor>OMarchy Power Manager Plugin</vendor>
   <vendor_url>https://omarchy.org</vendor_url>
 
-  <action id="org.omarchy.plugins.power-manager.apply">
+  <action id="org.omarchy.plugins.power-advanced.apply">
     <description>Apply power management configurations</description>
     <message>Authentication is required to apply system-wide power profiles and udev rules</message>
     <defaults>
@@ -14,11 +14,11 @@
       <allow_inactive>auth_admin_keep</allow_inactive>
       <allow_active>auth_admin_keep</allow_active>
     </defaults>
-    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/omarchy-power-manager/power-manager-apply</annotate>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/omarchy-power-advanced/power-manager-apply</annotate>
     <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
   </action>
 
-  <action id="org.omarchy.plugins.power-manager.limit">
+  <action id="org.omarchy.plugins.power-advanced.limit">
     <description>Set battery charge limits</description>
     <message>Authentication is required to configure hardware battery charge limits</message>
     <defaults>
@@ -26,7 +26,7 @@
       <allow_inactive>auth_admin_keep</allow_inactive>
       <allow_active>auth_admin_keep</allow_active>
     </defaults>
-    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/omarchy-power-manager/power-manager-limit</annotate>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/omarchy-power-advanced/power-manager-limit</annotate>
     <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
   </action>
 </policyconfig>

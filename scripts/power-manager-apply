@@ -4,14 +4,18 @@ set -euo pipefail
 CONFIG_FILE="${OMARCHY_POWER_CONF:-${1:-}}"
 if [ -z "$CONFIG_FILE" ]; then
     CANDIDATES=()
-    if [ -n "${SUDO_USER:-}" ]; then
-        U_HOME=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || true)
-        if [ -n "$U_HOME" ]; then CANDIDATES+=("$U_HOME/.config/onlyvishesh.power-manager.json"); fi
-    fi
-    if [ -n "${XDG_CONFIG_HOME:-}" ]; then CANDIDATES+=("$XDG_CONFIG_HOME/onlyvishesh.power-manager.json"); fi
-    if [ -n "${HOME:-}" ]; then CANDIDATES+=("$HOME/.config/onlyvishesh.power-manager.json"); fi
-    for u_home in /home/*; do
-        if [ -d "$u_home/.config" ]; then CANDIDATES+=("$u_home/.config/onlyvishesh.power-manager.json"); fi
+    # Current name first in every location, then the upstream name this plugin
+    # was forked from, so an existing onlyvishesh config keeps working.
+    for conf_name in kurisu-null.power-advanced.json onlyvishesh.power-manager.json; do
+        if [ -n "${SUDO_USER:-}" ]; then
+            U_HOME=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || true)
+            if [ -n "$U_HOME" ]; then CANDIDATES+=("$U_HOME/.config/$conf_name"); fi
+        fi
+        if [ -n "${XDG_CONFIG_HOME:-}" ]; then CANDIDATES+=("$XDG_CONFIG_HOME/$conf_name"); fi
+        if [ -n "${HOME:-}" ]; then CANDIDATES+=("$HOME/.config/$conf_name"); fi
+        for u_home in /home/*; do
+            if [ -d "$u_home/.config" ]; then CANDIDATES+=("$u_home/.config/$conf_name"); fi
+        done
     done
     for cand in "${CANDIDATES[@]}"; do
         if [ -f "$cand" ]; then CONFIG_FILE="$cand"; break; fi
@@ -33,7 +37,7 @@ DIR="$(dirname "$(realpath "$0")")"
 UDEV_DIR="${OMARCHY_UDEV_DIR:-/etc/udev/rules.d}"
 if [ "$(id -u)" -eq 0 ] || [ -n "${OMARCHY_UDEV_DIR:-}" ]; then
     mkdir -p "$UDEV_DIR" 2>/dev/null || true
-    if ! cat <<UDEV > "$UDEV_DIR/90-omarchy-power-manager.rules" 2>/dev/null
+    if ! cat <<UDEV > "$UDEV_DIR/90-power-advanced.rules" 2>/dev/null
 SUBSYSTEM=="power_supply", ACTION=="change", RUN+="$DIR/power-manager-profile-switch $CONFIG_FILE"
 UDEV
     then

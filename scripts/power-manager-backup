@@ -11,21 +11,21 @@ fi
 
 mkdir -p "$BACKUP_DIR"
 
-if [ -f "/etc/systemd/logind.conf.d/90-power-manager.conf" ]; then
-    cp "/etc/systemd/logind.conf.d/90-power-manager.conf" "$BACKUP_DIR/logind-90-power-manager.conf" 2>/dev/null || true
+if [ -f "/etc/systemd/logind.conf.d/90-power-advanced.conf" ]; then
+    cp "/etc/systemd/logind.conf.d/90-power-advanced.conf" "$BACKUP_DIR/logind-90-power-advanced.conf" 2>/dev/null || true
 fi
 
-if [ -f "/etc/systemd/sleep.conf.d/90-power-manager.conf" ]; then
-    cp "/etc/systemd/sleep.conf.d/90-power-manager.conf" "$BACKUP_DIR/sleep-90-power-manager.conf" 2>/dev/null || true
+if [ -f "/etc/systemd/sleep.conf.d/90-power-advanced.conf" ]; then
+    cp "/etc/systemd/sleep.conf.d/90-power-advanced.conf" "$BACKUP_DIR/sleep-90-power-advanced.conf" 2>/dev/null || true
 fi
 
-if [ -f "/etc/udev/rules.d/90-omarchy-power-manager.rules" ]; then
-    cp "/etc/udev/rules.d/90-omarchy-power-manager.rules" "$BACKUP_DIR/" 2>/dev/null || true
+if [ -f "/etc/udev/rules.d/90-power-advanced.rules" ]; then
+    cp "/etc/udev/rules.d/90-power-advanced.rules" "$BACKUP_DIR/" 2>/dev/null || true
 fi
 
 CONFIG_FILE="${OMARCHY_POWER_CONF:-}"
 if [ -z "$CONFIG_FILE" ]; then
-    for cand in "${XDG_CONFIG_HOME:-$HOME/.config}/onlyvishesh.power-manager.json" "${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/power-manager.json" "$HOME/.config/onlyvishesh.power-manager.json"; do
+    for cand in "${XDG_CONFIG_HOME:-$HOME/.config}/kurisu-null.power-advanced.json" "${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/power-manager.json" "$HOME/.config/kurisu-null.power-advanced.json"; do
         if [ -f "$cand" ]; then CONFIG_FILE="$cand"; break; fi
     done
 fi
