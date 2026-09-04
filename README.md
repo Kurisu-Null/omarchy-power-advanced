@@ -150,7 +150,7 @@ omarchy restart shell
 
 ### 📋 Dependencies
 
-Everything below ships with Omarchy except where noted, so on a stock system there is nothing to install.
+Everything below is present on a stock Omarchy system, so there is nothing to install.
 
 | | |
 |---|---|
@@ -158,7 +158,7 @@ Everything below ships with Omarchy except where noted, so on a stock system the
 | `pkexec` (polkit) | how the panel invokes the privileged scripts |
 | `systemd` | `logind.conf.d`, `sleep.conf.d`, `tmpfiles.d` drop-ins |
 | `udevadm` | reloads the rule that reacts to AC plug/unplug |
-| `powerprofilesctl` | power-profile switching (**not** part of Omarchy — from `power-profiles-daemon`) |
+| `powerprofilesctl` | power-profile switching — from `power-profiles-daemon`, which is in Omarchy's base package set and has its service enabled at install time. Remove that package and profile switching is the one feature that stops working. |
 | `brightnessctl` | optional, only a fallback if `omarchy-brightness-display` is unavailable |
 
 From Omarchy itself: `omarchy-battery-status`, `omarchy-powerprofiles-list`, `omarchy-powerprofiles-set`, `omarchy-brightness-display`, `omarchy-notification-send`.
