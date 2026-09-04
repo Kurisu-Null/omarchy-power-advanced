@@ -1,0 +1,67 @@
+#!/bin/bash
+#
+# Follows the journal for everything that touches idle, sleep, the lid and this
+# plugin's backend. Useful while testing a rule change: you set a one-minute
+# sleep timeout, leave the machine alone, and watch what actually happens.
+#
+# There is nothing to assert here, which is why it lives in scripts/ and not
+# tests/ -- it is a window, not a check. It runs until you stop it.
+#
+# It used to also print the battery state and dump the config, but the panel
+# shows both of those now, and better.
+set -uo pipefail
+
+FOLLOW=true
+LINES=50
+case ${1:-} in
+  -h | --help)
+    cat <<USAGE
+Usage: ${0##*/} [--since <time>] [--no-follow] [-n <lines>]
+
+Follows the journal, filtered to idle/sleep/lid activity and this plugin.
+
+  --since <time>   pass through to journalctl, e.g. --since "10 min ago"
+  --no-follow      print recent matches and exit instead of following
+  -n <lines>       how much history to show first (default $LINES)
+USAGE
+    exit 0
+    ;;
+esac
+
+ARGS=()
+SINCE=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    --since) SINCE=$2; shift 2 ;;
+    --no-follow) FOLLOW=false; shift ;;
+    -n) LINES=$2; shift 2 ;;
+    *) printf '%s: unknown option: %s\n' "${0##*/}" "$1" >&2; exit 1 ;;
+  esac
+done
+
+# -n and --since fight each other: -n takes the last N entries of the whole
+# journal, so a busy machine fills that budget with recent noise and the older
+# window asked for by --since never appears. Use one or the other.
+if [ -n "$SINCE" ]; then
+  ARGS+=(--since "$SINCE")
+else
+  ARGS+=(-n "$LINES")
+fi
+
+$FOLLOW && ARGS+=(-f)
+
+# What each pattern is for:
+#   power-advanced        this plugin -- the panel's sleep decisions and the
+#                         backend scripts' pa_log output
+#   omarchy idle          Omarchy's own idle service: screensaver and lock
+#   systemd-logind        lid handling, which is what our drop-in configures
+#   systemd-sleep, sleep target, Performing sleep operation
+#                         the kernel and systemd actually going to sleep
+PATTERN='power-advanced|omarchy idle|systemd-logind|systemd-sleep|Performing sleep operation|(Reached|Stopped) target Sleep|PM: suspend'
+
+printf 'watching: idle, sleep, lid and power-advanced events\n'
+$FOLLOW && printf 'Ctrl-C to stop\n'
+printf '\n'
+
+journalctl --no-pager "${ARGS[@]}" \
+  | grep --line-buffered -iE "$PATTERN"

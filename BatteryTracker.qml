@@ -83,7 +83,7 @@ Item {
     if (!root.supported || !root.validPath(root.batteryPath) || applyProc.running) return
     root.applying = true
     applyProc.pct = pct
-    applyProc.command = ["pkexec", "/usr/local/libexec/omarchy-power-advanced/power-manager-limit", String(pct), root.batteryPath, root.tmpfilesPath]
+    applyProc.command = ["pkexec", "/usr/local/libexec/omarchy-power-advanced/power-advanced-limit", String(pct), root.batteryPath, root.tmpfilesPath]
     console.log("Executing command:", applyProc.command)
     applyProc.running = true
   }
@@ -169,12 +169,12 @@ Item {
       root.refresh()
       if (code === 0) {
         Quickshell.execDetached(["omarchy-notification-send", "-e", "-u", "low",
-          "Power Manager", applyProc.pct === 100
+          "Power Advanced", applyProc.pct === 100
             ? "Charge limit removed — stock behavior restored"
             : "Charge limit set to " + applyProc.pct + "%"])
       } else if (code !== 126) {
         Quickshell.execDetached(["omarchy-notification-send", "-e", "-u", "critical",
-          "Power Manager", "Could not set the charge limit (exit " + code + ")"])
+          "Power Advanced", "Could not set the charge limit (exit " + code + ")"])
       }
     }
   }

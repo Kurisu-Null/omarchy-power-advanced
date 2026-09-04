@@ -1,0 +1,183 @@
+#!/bin/bash
+#
+# Applies the ruleset for the current power source: power profile, optional
+# brightness, and the logind/sleep drop-ins.
+#
+# Runs three ways: from the panel via power-advanced-apply, from udev on every
+# AC plug and unplug, and by hand. Only the logind/sleep writes need root; the
+# rest degrades quietly without it.
+set -euo pipefail
+# udev gives a child almost no environment, so guarantee the system paths are
+# present -- but *append* them. Prepending would override the caller's PATH,
+# which silently made the test suite drive the real powerprofilesctl instead of
+# its stub. pkexec resets PATH itself and udev sets its own, so honouring the
+# inherited one first is safe in both real contexts.
+export PATH="${PATH:+$PATH:}/usr/bin:/bin:/usr/sbin:/sbin"
+
+PA_DIR="$(dirname "$(realpath "$0")")"
+# shellcheck source=lib.sh
+. "$PA_DIR/lib.sh"
+
+# Checked before anything else: udev keeps invoking this on every AC change even
+# after the plugin is gone, and switching profiles for a plugin the user removed
+# is worse than doing nothing. Exit 0 so udev does not log a failure every time.
+if pa_orphaned "$PA_DIR"; then
+  pa_log "plugin directory is gone; standing down (run extras/uninstall.sh to remove the backend)"
+  exit 0
+fi
+
+pa_require jq
+
+CONFIG_FILE=$(pa_resolve_config "${OMARCHY_POWER_CONF:-${1:-}}") \
+  || pa_fail "no config file found"
+[ -f "$CONFIG_FILE" ] || pa_fail "config file not found: $CONFIG_FILE"
+pa_read_config "$CONFIG_FILE" || pa_fail "malformed config: $CONFIG_FILE"
+
+pa_read_power_supply
+STATE_KEY=$(pa_state_key)
+
+PREVIOUS=none
+if command -v powerprofilesctl >/dev/null 2>&1; then
+  PREVIOUS=$(powerprofilesctl get 2>/dev/null || echo none)
+fi
+
+# --- decide -----------------------------------------------------------------
+
+if [ "$PA_ENABLED" != true ]; then
+  # Automatic management off: report the current state, change nothing.
+  pa_ok "$(jq -cn --arg p "$PREVIOUS" --arg s "$STATE_KEY" \
+    '{previous: $p, current: $p, state: $s, reason: "disabled", brightness: ""}')"
+  exit 0
+fi
+
+case $STATE_KEY in
+  ac)          PROFILE=$PA_PROF_AC;       BRIGHTNESS=$PA_BRIGHT_AC;       REASON=ac_connected ;;
+  batteryLow)  PROFILE=$PA_PROF_BAT_LOW;  BRIGHTNESS=$PA_BRIGHT_BAT_LOW;  REASON=low_battery ;;
+  *)           PROFILE=$PA_PROF_BAT_HIGH; BRIGHTNESS=$PA_BRIGHT_BAT_HIGH; REASON=battery ;;
+esac
+
+# --- power profile ----------------------------------------------------------
+
+if command -v powerprofilesctl >/dev/null 2>&1; then
+  powerprofilesctl set "$PROFILE" || pa_log "powerprofilesctl set $PROFILE failed"
+elif command -v omarchy-powerprofiles-set >/dev/null 2>&1; then
+  omarchy-powerprofiles-set autodetect "$PROFILE" || pa_log "omarchy-powerprofiles-set failed"
+else
+  pa_log "no power-profile backend found; profile not changed"
+fi
+
+# Omarchy remembers a profile per power source; keep its state in step so the
+# shell's own panel agrees with us.
+pa_remember_profile() {
+  local dir=$1
+  mkdir -p "$dir" 2>/dev/null || return 0
+  if [ "$STATE_KEY" = ac ]; then
+    printf '%s\n' "$PA_PROF_AC" >"$dir/ac" 2>/dev/null || true
+    [ -f "$dir/battery" ] || printf '%s\n' "$PA_PROF_BAT_HIGH" >"$dir/battery" 2>/dev/null || true
+  else
+    printf '%s\n' "$PROFILE" >"$dir/battery" 2>/dev/null || true
+    [ -f "$dir/ac" ] || printf '%s\n' "$PA_PROF_AC" >"$dir/ac" 2>/dev/null || true
+  fi
+}
+
+if [ -n "${XDG_STATE_HOME:-}" ]; then
+  pa_remember_profile "$XDG_STATE_HOME/omarchy/powerprofiles"
+elif [ -n "${HOME:-}" ] && [ "$(id -u)" -ne 0 ]; then
+  pa_remember_profile "$HOME/.local/state/omarchy/powerprofiles"
+else
+  for user_home in /home/*; do
+    [ -d "$user_home" ] && pa_remember_profile "$user_home/.local/state/omarchy/powerprofiles"
+  done
+fi
+
+# --- brightness -------------------------------------------------------------
+#
+# Opt-in, and 0 means "leave it alone" rather than "go dark".
+
+APPLIED_BRIGHTNESS=""
+if [ "$PA_BRIGHT_AUTO" = true ] && [ "$BRIGHTNESS" -gt 0 ]; then
+  APPLIED_BRIGHTNESS="${BRIGHTNESS}%"
+  if [ "$(id -u)" -ne 0 ] && command -v omarchy-brightness-display >/dev/null 2>&1; then
+    omarchy-brightness-display --no-osd "$APPLIED_BRIGHTNESS" >/dev/null \
+      || pa_log "omarchy-brightness-display failed"
+  elif command -v brightnessctl >/dev/null 2>&1; then
+    brightnessctl set "$APPLIED_BRIGHTNESS" >/dev/null \
+      || pa_log "brightnessctl failed"
+  else
+    pa_log "no brightness backend found"
+    APPLIED_BRIGHTNESS=""
+  fi
+fi
+
+# --- logind and sleep drop-ins ---------------------------------------------
+
+LOGIND_DIR=${OMARCHY_SYSTEMD_LOGIND_DIR:-/etc/systemd/logind.conf.d}
+SLEEP_DIR=${OMARCHY_SYSTEMD_SLEEP_DIR:-/etc/systemd/sleep.conf.d}
+WROTE_DROPINS=false
+
+if [ "$(id -u)" -eq 0 ] || [ -n "${OMARCHY_SYSTEMD_LOGIND_DIR:-}" ] || [ -n "${OMARCHY_SYSTEMD_SLEEP_DIR:-}" ]; then
+  if [ "$STATE_KEY" = batteryLow ]; then
+    LID_BATTERY=$PA_LID_BAT_LOW
+  else
+    LID_BATTERY=$PA_LID_BAT_HIGH
+  fi
+  LID_AC=$PA_LID_AC
+
+  if [ "$PA_LID_IGNORE" = true ]; then
+    LID_AC=ignore
+    LID_BATTERY=ignore
+  fi
+
+  # These land in a systemd unit file, so reject anything logind would not
+  # accept rather than writing a config that makes it ignore the whole file.
+  pa_valid_lid_action "$LID_AC" || pa_fail "invalid lid action for AC: $LID_AC"
+  pa_valid_lid_action "$LID_BATTERY" || pa_fail "invalid lid action for battery: $LID_BATTERY"
+
+  # HibernateDelaySec is global and so is the config key behind it.
+  HIBERNATE_MINUTES=$PA_HIB_MINUTES
+  [ "$HIBERNATE_MINUTES" -gt 0 ] || HIBERNATE_MINUTES=30
+
+  mkdir -p "$LOGIND_DIR" "$SLEEP_DIR" || pa_fail "cannot create systemd drop-in directories"
+
+  # Lid handling only. IdleAction/IdleActionSec are deliberately absent:
+  # logind decides a session is idle from IdleHint, which nothing sets under
+  # Hyprland, so they could never fire. The panel handles idle sleep through
+  # Wayland's idle-notify protocol. Lid events do not go through IdleHint,
+  # which is why these lines are the real mechanism.
+  cat >"$LOGIND_DIR/$PA_UNIT.conf" <<INI || pa_fail "cannot write $LOGIND_DIR/$PA_UNIT.conf"
+[Login]
+HandleLidSwitch=$LID_BATTERY
+HandleLidSwitchExternalPower=$LID_AC
+HandleLidSwitchDocked=ignore
+INI
+
+  cat >"$SLEEP_DIR/$PA_UNIT.conf" <<INI || pa_fail "cannot write $SLEEP_DIR/$PA_UNIT.conf"
+[Sleep]
+HibernateDelaySec=$((HIBERNATE_MINUTES * 60))
+SuspendEstimationSec=3600
+INI
+
+  WROTE_DROPINS=true
+
+  # Omarchy's own screensaver and lock timers are deliberately left alone.
+  # An earlier version rewrote ~/.config/omarchy/shell.json here to force
+  # idle.lock to equal the sleep timeout. That is the wrong trade: lock is a
+  # security policy and sleep is a power policy, so equating them silently
+  # lengthens the lock timeout whenever the sleep timeout is long -- a 30
+  # minute sleep rule pushed a 5 minute lock out to 30 minutes, as root, on
+  # every AC event.
+
+  if [ "$(id -u)" -eq 0 ]; then
+    systemctl kill -s HUP systemd-logind || pa_log "could not signal systemd-logind"
+  fi
+fi
+
+pa_ok "$(jq -cn \
+  --arg previous "$PREVIOUS" \
+  --arg current "$PROFILE" \
+  --arg state "$STATE_KEY" \
+  --arg reason "$REASON" \
+  --arg brightness "$APPLIED_BRIGHTNESS" \
+  --argjson dropins "$WROTE_DROPINS" \
+  '{previous: $previous, current: $current, state: $state,
+    reason: $reason, brightness: $brightness, dropins: $dropins}')"

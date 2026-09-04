@@ -1,0 +1,53 @@
+#!/bin/bash
+#
+# Sets the firmware charge cut-off and the tmpfiles rule that re-applies it at
+# boot. Root-only, reached from the panel through pkexec.
+#
+# Everything here arrives from argv, so nothing is trusted: the panel
+# validating a value first is not a guarantee, and the polkit action uses
+# auth_admin_keep, meaning any local process can invoke it once the password
+# has been cached. Both paths are therefore pattern-checked before use.
+set -euo pipefail
+
+# shellcheck source=lib.sh
+. "$(dirname "$(realpath "$0")")/lib.sh"
+
+pa_require jq
+
+[ "$(id -u)" -eq 0 ] || pa_fail "must be run as root"
+
+LIMIT=${1:-}
+BATTERY_PATH=${2:-}
+TMPFILES_PATH=${3:-}
+
+[ -n "$LIMIT" ] && [ -n "$BATTERY_PATH" ] && [ -n "$TMPFILES_PATH" ] \
+  || pa_fail "usage: ${0##*/} <limit 50-100> <battery sysfs path> <tmpfiles path>"
+
+[[ $LIMIT =~ ^[0-9]+$ ]] || pa_fail "limit must be an integer: $LIMIT"
+# Below 50 is not a charge limit, it is a way to make a laptop useless, and
+# some firmware refuses it outright.
+[ "$LIMIT" -ge 50 ] && [ "$LIMIT" -le 100 ] || pa_fail "limit out of range (50-100): $LIMIT"
+
+pa_valid_battery_path "$BATTERY_PATH" || pa_fail "not a battery sysfs path: $BATTERY_PATH"
+pa_valid_tmpfiles_path "$TMPFILES_PATH" || pa_fail "not a tmpfiles.d path: $TMPFILES_PATH"
+
+THRESHOLD_FILE="$BATTERY_PATH/charge_control_end_threshold"
+[ -w "$THRESHOLD_FILE" ] || pa_fail "firmware charge limit unsupported here: $THRESHOLD_FILE"
+
+printf '%s\n' "$LIMIT" >"$THRESHOLD_FILE" \
+  || pa_fail "firmware rejected the limit $LIMIT"
+
+# 100 means no limit, so drop the persistence rule rather than pinning 100.
+if [ "$LIMIT" -eq 100 ]; then
+  rm -f "$TMPFILES_PATH" || pa_fail "cannot remove $TMPFILES_PATH"
+else
+  printf 'w %s - - - - %s\n' "$THRESHOLD_FILE" "$LIMIT" >"$TMPFILES_PATH" \
+    || pa_fail "cannot write $TMPFILES_PATH"
+fi
+
+# Report what the firmware actually accepted, which is not always what was
+# asked for -- some vendors silently round to their own supported steps.
+EFFECTIVE=$(tr -d '[:space:]' <"$THRESHOLD_FILE" 2>/dev/null || echo "$LIMIT")
+
+pa_ok "$(jq -cn --argjson requested "$LIMIT" --arg effective "$EFFECTIVE" \
+  '{requested: $requested, effective: ($effective | tonumber? // $requested)}')"

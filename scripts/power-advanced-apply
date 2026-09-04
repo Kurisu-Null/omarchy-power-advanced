@@ -1,0 +1,69 @@
+#!/bin/bash
+#
+# Installs the udev rule that re-applies the ruleset on AC plug/unplug, then
+# hands over to power-advanced-profile-switch for the rest.
+#
+# Invoked by the panel through pkexec. stdout is one JSON object the panel
+# reads; anything on stderr reaches the journal.
+set -euo pipefail
+
+DIR=$(dirname "$(realpath "$0")")
+# shellcheck source=lib.sh
+. "$DIR/lib.sh"
+
+pa_require jq
+
+CONFIG_FILE=$(pa_resolve_config "${OMARCHY_POWER_CONF:-${1:-}}") \
+  || pa_fail "no config file found"
+[ -f "$CONFIG_FILE" ] || pa_fail "config file not found: $CONFIG_FILE"
+jq empty "$CONFIG_FILE" 2>/dev/null || pa_fail "malformed JSON config: $CONFIG_FILE"
+
+SWITCH="$DIR/power-advanced-profile-switch"
+[ -x "$SWITCH" ] || pa_fail "missing helper: $SWITCH"
+
+# --- udev rule --------------------------------------------------------------
+
+UDEV_DIR=${OMARCHY_UDEV_DIR:-/etc/udev/rules.d}
+WROTE_UDEV=false
+
+if [ "$(id -u)" -eq 0 ] || [ -n "${OMARCHY_UDEV_DIR:-}" ]; then
+  # Both paths are interpolated into a RUN+= directive, so refuse anything
+  # containing a quote, a space or a backslash rather than emitting a rule
+  # that could close the string and inject a second directive.
+  pa_valid_udev_arg "$SWITCH" || pa_fail "helper path unsafe for a udev rule: $SWITCH"
+  pa_valid_udev_arg "$CONFIG_FILE" || pa_fail "config path unsafe for a udev rule: $CONFIG_FILE"
+
+  mkdir -p "$UDEV_DIR" || pa_fail "cannot create $UDEV_DIR"
+  cat >"$UDEV_DIR/$PA_UNIT.rules" <<RULE || pa_fail "cannot write $UDEV_DIR/$PA_UNIT.rules"
+SUBSYSTEM=="power_supply", ACTION=="change", RUN+="$SWITCH $CONFIG_FILE"
+RULE
+  WROTE_UDEV=true
+
+  if [ "$(id -u)" -eq 0 ] && command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload-rules || pa_log "udevadm control --reload-rules failed"
+  fi
+fi
+
+# --- delegate ---------------------------------------------------------------
+#
+# The old version ran this as `… >/dev/null 2>&1 || true` and then reported
+# success unconditionally, so a failure here was indistinguishable from a clean
+# apply. Keep going on failure -- the udev rule is already in place and worth
+# keeping -- but report it, because the panel has UI for exactly this.
+
+SWITCH_OUTPUT=""
+SWITCH_STATUS=0
+SWITCH_OUTPUT=$("$SWITCH" "$CONFIG_FILE" 2>&1 >/dev/null) || SWITCH_STATUS=$?
+
+if [ "$SWITCH_STATUS" -ne 0 ]; then
+  jq -cn \
+    --arg out "$SWITCH_OUTPUT" \
+    --argjson code "$SWITCH_STATUS" \
+    --argjson udev "$WROTE_UDEV" \
+    '{success: false, applied: (if $udev then ["udev"] else [] end),
+      errors: ["profile switch failed (exit \($code))" + (if $out == "" then "" else ": " + $out end)]}'
+  exit 1
+fi
+
+pa_ok "$(jq -cn --argjson udev "$WROTE_UDEV" \
+  '{applied: ((if $udev then ["udev"] else [] end) + ["profile", "logind"]), errors: []}')"

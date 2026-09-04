@@ -55,7 +55,7 @@ The power-draw trace is sampled from UPower's live `changeRate` every five secon
 ---
 
 ### ⚙️ Rules
-All of the automation, one power state at a time. Pick **AC**, **Battery**, or **Low**, and the tab shows that state's complete ruleset: power profile, screen brightness, idle timeout, what happens when it expires, and what the lid does. The hibernate delay only appears when the idle action is *Suspend → hibernate*, because that is the only action that uses it. Global switches (automatic management, the low-battery threshold, ignore-the-lid) sit below the separator. Edits are staged and land together on **Apply changes**.
+All of the automation, one power state at a time. Pick **AC**, **Battery**, or **Low**, and the tab shows that state's complete ruleset: power profile, screen brightness, idle timeout, what happens when it expires, and what the lid does. The hibernate delay only appears when the idle action or the lid action is *Suspend → hibernate*, because that is the only action that uses it — and it is a single system-wide number, since `HibernateDelaySec` is one setting for the whole machine. Global switches (automatic management, the low-battery threshold, ignore-the-lid) sit below the separator. Edits are staged and land together on **Apply changes**.
 
 <p align="center">
   <img src="assets/rules.png" width="560" alt="Rules tab" />
@@ -66,7 +66,7 @@ All of the automation, one power state at a time. Pick **AC**, **Battery**, or *
 ### 🛠️ System
 Hibernation readiness broken into the five checks that actually gate it, the sleep states your kernel supports, what the backend currently has configured in `logind`, whether the privileged backend is installed, bar appearance, and a confirmed reset.
 
-If the backend is missing, or a `pkexec` prompt is dismissed, the panel says so in a strip pinned below the content with the command to fix it — rather than reporting a save that never reached the system.
+If the backend is missing, or a `pkexec` prompt is dismissed, the panel says so in a strip pinned below the content — rather than reporting a save that never reached the system. The strip carries the fix as a button: **Install…** when the backend was never set up, **Retry** when a prompt was dismissed.
 
 <p align="center">
   <img src="assets/system.png" width="560" alt="System tab" />
@@ -128,11 +128,14 @@ omarchy plugin add https://github.com/Kurisu-Null/omarchy-power-advanced.git --e
 ```
 This is the supported path: Omarchy clones the repo, runs `omarchy plugin validate` on it and refuses anything malformed, installs it to `~/.config/omarchy/plugins/<manifest id>`, and offers to place the widget in your bar. It also makes `omarchy plugin update` work later.
 
-Then install the privileged backend. **This step is required** for charge limits, lid actions and automatic profile switching — without it the panel still shows your battery, but anything needing root cannot work (and the panel will tell you so):
+Then install the privileged backend. **This step is required** for charge limits, lid actions and automatic profile switching — without it the panel still shows your battery, but anything needing root cannot work.
+
+The panel says so and offers to do it: open it and press **Install…** on the warning strip, or use **Install backend** in the System tab. Either opens a terminal running the `sudo` command below, so you can read it before typing your password. To do it by hand instead:
 ```bash
 sudo ~/.config/omarchy/plugins/kurisu-null.power-advanced/extras/install.sh
 omarchy restart shell
 ```
+The System tab keeps a **Reinstall backend** button afterwards — run it after a `omarchy plugin update`, which ships new script versions to your home directory but cannot copy them to `libexec` on its own.
 
 ### Option 2: Manual clone
 The install directory name **must** match the `id` in `manifest.json`, or the shell will not find the plugin:
@@ -173,6 +176,32 @@ Hardware-dependent, degrading gracefully when absent: a firmware charge limit ne
 
 ---
 
+### 🧪 Tests
+
+```bash
+tests/run.sh            # everything
+tests/run.sh limit      # only cases matching "limit"
+```
+
+No framework to install — the suite is plain bash and needs only `jq`, so it runs on a stock Omarchy box.
+
+**Nothing it does touches the real system.** Every backend script honours env overrides for the paths it writes (`OMARCHY_POWER_CONF`, `OMARCHY_UDEV_DIR`, `OMARCHY_SYSTEMD_LOGIND_DIR`, `OMARCHY_SYSTEMD_SLEEP_DIR`, `OMARCHY_POWER_SUPPLY_PATH`), so each case runs as a normal user against a fake `/sys/class/power_supply` tree and a temp directory, with stubs on `PATH` in place of `powerprofilesctl` and `brightnessctl`.
+
+It covers which ruleset applies for a given power state, profile switching, the lid drop-ins, brightness, config fallbacks for missing and wrongly-typed keys, error propagation out of `apply`, and argument validation on the root-executed `power-advanced-limit`.
+
+---
+
+### 🔭 Watching what it does
+
+```bash
+scripts/power-advanced-watch                     # follow live
+scripts/power-advanced-watch --since "10 min ago" --no-follow
+```
+
+Tails the journal filtered to idle, sleep, lid and this plugin's own activity. Useful when testing a rule: set a one-minute sleep timeout, leave the machine alone, and watch whether it decides to sleep — the panel logs one line when it does, and one when Stay Awake suppresses it.
+
+---
+
 ### 🔒 What this plugin does with root
 
 `omarchy plugin add` warns that plugins run as unsandboxed code inside your long-lived shell process, and tells you to review the code before enabling it. That is good advice, so here is exactly what this one touches once you run `install.sh`:
@@ -188,11 +217,30 @@ Hardware-dependent, degrading gracefully when absent: a firmware charge limit ne
 
 All of them are drop-in overrides, so removing the files restores stock behaviour.
 
-**Why `install.sh` is a manual `sudo` step and not automated from the UI.** Omarchy deliberately runs no post-install hooks, so plugins cannot execute root commands without your explicit consent. Automating it would mean `pkexec`-ing a script that lives in a user-writable folder — and anything that can write to your home directory could swap that script while the password prompt is on screen, so your password would authorise their code instead. The only safe bootstrap is you typing `sudo` against a path you chose, in your own terminal. Once the scripts are copied to the root-owned `libexec` path, the Polkit policy pins them there and the panel can call them safely.
+**Why the panel opens a terminal instead of just installing the backend itself.** Omarchy deliberately runs no post-install hooks, so plugins cannot execute root commands without your explicit consent. Doing it silently would mean `pkexec`-ing a script that lives in a user-writable folder — and anything that can write to your home directory could swap that script while the password prompt is on screen, so your password would authorise their code instead. So the buttons take the same route the CLI does: they launch a floating terminal running `sudo <path to install.sh>`, where you can read the command, see which path it points at, and type your password yourself. Once the scripts are copied to the root-owned `libexec` path, the Polkit policy pins them there and the panel can call them safely without prompting again.
 
 ### 🗑️ Uninstallation
+Use **Uninstall backend** in the System tab, or run it yourself — either way, **before** removing the plugin, while its files are still on disk:
 ```bash
+sudo ~/.config/omarchy/plugins/kurisu-null.power-advanced/extras/uninstall.sh
 omarchy plugin remove kurisu-null.power-advanced
+```
+`omarchy plugin remove` only deletes the plugin folder in your home directory. Everything `install.sh` wrote is root-owned and lives outside it, so removing the plugin on its own leaves the backend running headless — the udev rule keeps switching profiles, tmpfiles keeps re-applying your charge limit at every boot, and the logind drop-in keeps overriding what closing the lid does.
+
+The uninstaller reverses all of it, including **lifting the charge limit back to 100%** so your battery is not left capped by a plugin that is no longer there. Lid and sleep behaviour revert on your next reboot.
+
+If you remove the plugin without uninstalling first, the backend notices. `install.sh` records the plugin's directory, and the profile switcher stands down when that directory is gone — so the orphaned udev rule stops switching profiles instead of doing it forever with no UI to explain it. It says so in the journal:
+```
+power-advanced-profile-switch: plugin directory is gone; standing down
+  (run extras/uninstall.sh to remove the backend)
+```
+That covers the part that *acts*. The charge-limit tmpfiles entry and the logind drop-ins are plain config with no script behind them, so they keep applying until the uninstaller removes them — which is why it is still the right way out.
+
+There is no automatic hook: `omarchy plugin remove` never executes anything from a plugin's directory, by design. Plugin folders are user-writable, so auto-running their scripts as root is precisely the risk that design avoids.
+
+Your settings and battery health history are kept, so reinstalling picks up where you left off. To delete those too:
+```bash
+sudo ~/.config/omarchy/plugins/kurisu-null.power-advanced/extras/uninstall.sh --purge
 ```
 To update to a newer release:
 ```bash
