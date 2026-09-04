@@ -686,6 +686,23 @@ Panel {
   readonly property bool shellIdleDirty: canEditShellIdle
     && (screensaverStaged !== liveScreensaverSecs || lockStaged !== liveLockSecs)
 
+  // Whether any rule at all can reach suspend-then-hibernate, which is the
+  // only action that reads HibernateDelaySec. Asked across every state rather
+  // than the selected one: the delay is a single global value, so a field that
+  // appeared and vanished with the state picker would be describing itself
+  // wrongly.
+  readonly property bool anyHibernateAction: {
+    var _ = root.editConfig
+    var states = Model.powerStates()
+    var lidLive = root.getVal("lid.ignoreLidClose", false) !== true
+    for (var i = 0; i < states.length; i++) {
+      var key = states[i].key
+      if (root.getVal("idle." + key + ".afterSleep", "") === "suspend-then-hibernate") return true
+      if (lidLive && root.getVal("lid." + key + ".action", "") === "suspend-then-hibernate") return true
+    }
+    return false
+  }
+
   // The shortest idle-sleep timeout any state can actually reach, in seconds.
   // Lock is one global value, so it is the shortest sleep it has to beat —
   // states set to "Do nothing" or to no timeout never sleep and do not count.
@@ -1828,24 +1845,6 @@ Panel {
           options: Model.actionOptions()
           configKey: "lid." + root.ruleState + ".action"
         }
-
-        // Suspend → hibernate is the only action that reads HibernateDelaySec,
-        // and either of the two rows above can select it — so the row appears
-        // for both, and sits under the lid rather than jumping between them.
-        // The value itself is global: logind has one HibernateDelaySec.
-        NumberRow {
-          label: "Hibernate after (min)"
-          description: "Every state, idle and lid alike"
-          visible: {
-            var _ = root.editConfig
-            return root.getVal("idle." + root.ruleState + ".afterSleep", "") === "suspend-then-hibernate"
-              || (root.getVal("lid.ignoreLidClose", false) !== true
-                  && root.getVal("lid." + root.ruleState + ".action", "") === "suspend-then-hibernate")
-          }
-          from: 1
-          to: 1440
-          configKey: "hibernateAfterMinutes"
-        }
       }
 
       PanelSeparator { foreground: root.fg }
@@ -1887,6 +1886,17 @@ Panel {
           description: "Apply the per-state brightness above"
           visible: root.showAutoBrightness
           configKey: "brightness.auto"
+        }
+
+        // Global because logind has exactly one HibernateDelaySec, so it sits
+        // with the other globals rather than inside a state's ruleset.
+        NumberRow {
+          label: "Hibernate after (min)"
+          description: "Any Suspend → hibernate"
+          visible: root.anyHibernateAction
+          from: 1
+          to: 1440
+          configKey: "hibernateAfterMinutes"
         }
 
         // ---------- Omarchy's screen timers ----------
