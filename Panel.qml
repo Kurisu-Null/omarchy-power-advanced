@@ -8,7 +8,7 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// Power Manager — an Omarchy bar panel.
+// Power Advanced — an Omarchy bar panel.
 //
 // The visual contract is the shell's own: every surface is a kit component
 // (Button, Dropdown, NumberField, ToggleSwitch, PanelSlider, CursorSurface),
@@ -358,6 +358,12 @@ Panel {
     var d = UPower.displayDevice
     return d && d.isPresent ? Math.max(0, d.changeRate) : 0
   }
+
+  // What the trace records. Signed, because a magnitude-only trace draws a
+  // plug-in as a bend in one continuous hump: discharging at 12W then charging
+  // at 30W reads as "draw rose", when the direction actually reversed. Out of
+  // the battery is negative, into it positive.
+  readonly property real powerFlow: root.discharging ? -powerDraw : powerDraw
   function formatDuration(seconds) {
     var total = Math.round(Number(seconds) || 0)
     if (total <= 0) return ""
@@ -395,7 +401,7 @@ Panel {
     triggeredOnStart: true
     onTriggered: {
       var next = root.powerSamples.slice(root.powerSamples.length >= root.powerMaxSamples ? 1 : 0)
-      next.push(root.powerDraw)
+      next.push(root.powerFlow)
       root.powerSamples = next
     }
   }
@@ -444,7 +450,9 @@ Panel {
 
   readonly property var cursorSections: {
     if (currentTab === "rules") return ["states", "switcher"]
-    if (currentTab === "system") return ["reset", "switcher"]
+    if (currentTab === "system") return backendInstalled
+        ? ["installer", "uninstaller", "reset", "switcher"]
+        : ["installer", "reset", "switcher"]
     var list = []
     if (statDoors().length > 0) list.push("stats")
     if (expandedStat === "limit") list.push("limitpills")
@@ -539,6 +547,10 @@ Panel {
     } else if (focusSection === "states") {
       var states = Model.powerStates()
       if (selectedIndex < states.length) ruleState = states[selectedIndex].key
+    } else if (focusSection === "installer") {
+      runBackendInstaller()
+    } else if (focusSection === "uninstaller") {
+      runBackendUninstaller()
     } else if (focusSection === "reset") {
       resetPending = true
     } else if (focusSection === "switcher") {
@@ -619,25 +631,10 @@ Panel {
   readonly property int idleSleepMins: root.configVal("idle." + currentStateKey + ".sleepAfterMinutes", 0)
   readonly property string idleAction: root.configVal("idle." + currentStateKey + ".afterSleep", "ignore")
 
-  FileView {
-    id: stayAwakeFile
-    path: Quickshell.env("HOME") + "/.local/state/omarchy/indicators/stay-awake"
-    watchChanges: true
-    printErrors: false
-    onFileChanged: reload()
-  }
-
-  // Omarchy writes the literal string "yes" while Stay Awake is on.
-  readonly property bool stayAwake: {
-    var raw = stayAwakeFile.text()
-    return String(raw === undefined || raw === null ? "" : raw).trim() === "yes"
-  }
-
   readonly property bool idleSleepArmed: !!bar
     && configVal("enabled", true) === true
     && idleSleepMins > 0
     && idleAction !== "ignore"
-    && !stayAwake
 
   IdleMonitor {
     enabled: root.idleSleepArmed
@@ -659,7 +656,25 @@ Panel {
       "poweroff": "poweroff"
     })[idleAction]
     if (!verb) return
-    idleActionProc.command = ["systemctl", verb]
+    // One line, only when actually acting, so it stays out of the way while
+    // making the decision visible in the journal. Without it a machine that
+    // fails to sleep leaves no trace explaining why.
+    console.log("power-advanced: idle " + idleSleepMins + "min in state "
+      + currentStateKey + " -> systemctl " + verb)
+
+    // Omarchy's Stay Awake is a flag file created with `touch`, so its
+    // *existence* is the state and its contents are empty. It can also be
+    // toggled at any moment, so it is checked here at the point of action
+    // rather than mirrored into a property that could be stale. The
+    // suppression is logged too — "nothing happened" is otherwise
+    // indistinguishable from a broken idle monitor.
+    idleActionProc.command = ["bash", "-c",
+      "if [ -e \"$HOME/.local/state/omarchy/indicators/stay-awake\" ]; then\n"
+      + "  echo \"power-advanced: stay awake is on, skipping systemctl $1\" >&2\n"
+      + "  exit 0\n"
+      + "fi\n"
+      + "exec systemctl \"$1\"",
+      "bash", verb]
     idleActionProc.running = true
   }
 
@@ -705,12 +720,39 @@ Panel {
   // run, applying rules and setting a charge limit cannot work — so say so up
   // front rather than letting every attempt fail silently.
   readonly property string backendPath: "/usr/local/libexec/omarchy-power-advanced"
+  // Derived from moduleName rather than hardcoded, so a future id change does
+  // not silently break the installer button and the diagnostics call.
+  readonly property string pluginDir: Quickshell.env("HOME") + "/.config/omarchy/plugins/" + moduleName
+  readonly property string installerPath: pluginDir + "/extras/install.sh"
+  readonly property string uninstallerPath: pluginDir + "/extras/uninstall.sh"
+
+  // Elevation happens in a visible floating terminal, using the same launcher
+  // Omarchy uses for its own privileged setup (omarchy plugin add, DNS, ...),
+  // NOT a silent pkexec of install.sh.
+  //
+  // That distinction is the whole point: install.sh lives in a user-writable
+  // folder, so anything that can write to $HOME could swap it between the click
+  // and the password prompt. A GUI prompt gives you nothing to inspect; a
+  // terminal shows the command, the sudo prompt and the output, and is the
+  // pattern Omarchy already asks users to trust for privileged setup.
+  function runBackendInstaller() {
+    Quickshell.execDetached(["omarchy-launch-floating-terminal-with-presentation",
+                             "sudo " + installerPath])
+  }
+
+  // Same route, same reasoning. Omarchy has no plugin-remove hook, so this is
+  // the only way the root-owned backend comes off a machine from the UI -- and
+  // it has to run before `omarchy plugin remove`, while the script still exists.
+  function runBackendUninstaller() {
+    Quickshell.execDetached(["omarchy-launch-floating-terminal-with-presentation",
+                             "sudo " + uninstallerPath])
+  }
   property bool backendChecked: false
   property bool backendInstalled: false
 
   Process {
     id: backendProbe
-    command: ["sh", "-c", "test -x \"$1/power-manager-apply\" && test -x \"$1/power-manager-limit\" && echo yes", "sh", root.backendPath]
+    command: ["sh", "-c", "test -x \"$1/power-advanced-apply\" && test -x \"$1/power-advanced-limit\" && echo yes", "sh", root.backendPath]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -718,6 +760,16 @@ Panel {
         root.backendChecked = true
       }
     }
+  }
+
+  // While the panel is open and the backend is absent, keep re-probing so the
+  // UI corrects itself the moment the installer finishes in its terminal.
+  // Stops on its own once installed.
+  Timer {
+    interval: 3000
+    repeat: true
+    running: root.opened && root.backendChecked && !root.backendInstalled
+    onTriggered: if (!backendProbe.running) backendProbe.running = true
   }
 
   // Outcome of the last apply. The config write and the privileged step fail
@@ -764,7 +816,7 @@ Panel {
 
   Process {
     id: applyProc
-    command: ["pkexec", root.backendPath + "/power-manager-apply"]
+    command: ["pkexec", root.backendPath + "/power-advanced-apply"]
     onExited: function(code) {
       // pkexec: 126 = the user dismissed the prompt, 127 = nothing to run.
       if (code === 0) {
@@ -825,7 +877,7 @@ Panel {
 
   Process {
     id: diagnosticsProc
-    command: ["bash", "-c", "\"$HOME/.config/omarchy/plugins/kurisu-null.power-advanced/scripts/power-manager-diagnostics\" --json"]
+    command: ["bash", "-c", "\"$1\" --json", "bash", root.pluginDir + "/scripts/power-advanced-diagnostics"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -1038,8 +1090,14 @@ Panel {
 
         Button {
           id: retryButton
-          visible: root.applyState === "cancelled" || root.applyState === "write-failed"
-          text: "Retry"
+          // The strip reports two different problems, so the button offers the
+          // fix for whichever one is showing.
+          readonly property bool installs: statusStrip.blocking
+          visible: installs
+            || root.applyState === "cancelled"
+            || root.applyState === "write-failed"
+          text: installs ? "Install…" : "Retry"
+          tooltipText: installs ? "Opens a terminal running: sudo " + root.installerPath : ""
           fontSize: Style.font.caption
           foreground: root.fg
           fontFamily: root.uiFont
@@ -1049,7 +1107,7 @@ Panel {
           anchors.right: parent.right
           anchors.rightMargin: Style.space(6)
           anchors.verticalCenter: parent.verticalCenter
-          onClicked: root.applyChanges()
+          onClicked: installs ? root.runBackendInstaller() : root.applyChanges()
         }
       }
 
@@ -1093,7 +1151,7 @@ Panel {
         id: resetDialog
         anchors.fill: parent
         opened: root.resetPending
-        message: "Reset every Power Manager setting to its default?"
+        message: "Reset every Power Advanced setting to its default?"
         confirmText: "Reset"
         foreground: root.fg
         fontFamily: root.uiFont
@@ -1345,8 +1403,9 @@ Panel {
             for (var i = 0; i < p.length; i++) out.push({ x: i, y: p[i] })
             return out
           }
-          // Watts are a magnitude: anchoring at zero keeps the height of the
-          // trace honest instead of magnifying noise around a steady draw.
+          // Zero has to be on the axis: it is the line charging and
+          // discharging are read against, and anchoring there also keeps the
+          // height honest instead of magnifying noise around a steady draw.
           zeroBased: true
         }
 
@@ -1377,8 +1436,14 @@ Panel {
             if (root.expandedStat === "power") {
               var p = root.powerSamples
               if (p.length < 2) return "Collecting — the trace fills in over the next few minutes."
+              // Magnitudes: an average that let a charge cancel a discharge
+              // would report a busy ten minutes as an idle one.
               var sum = 0, peak = 0
-              for (var i = 0; i < p.length; i++) { sum += p[i]; if (p[i] > peak) peak = p[i] }
+              for (var i = 0; i < p.length; i++) {
+                var w = Math.abs(p[i])
+                sum += w
+                if (w > peak) peak = w
+              }
               var mins = Math.round(p.length * root.powerSampleSeconds / 60)
               return "avg " + (sum / p.length).toFixed(1) + "W · peak " + peak.toFixed(1) + "W · last "
                 + (mins < 1 ? "minute" : mins + " min")
@@ -1630,19 +1695,6 @@ Panel {
           configKey: "idle." + root.ruleState + ".afterSleep"
         }
 
-        // Only means anything for suspend-then-hibernate, which is the one
-        // action that reads HibernateDelaySec.
-        NumberRow {
-          label: "Hibernate after (min)"
-          visible: {
-            var _ = root.editConfig
-            return root.getVal("idle." + root.ruleState + ".afterSleep", "") === "suspend-then-hibernate"
-          }
-          from: 1
-          to: 1440
-          configKey: "idle." + root.ruleState + ".hibernateAfterMinutes"
-        }
-
         SelectRow {
           label: "Closing the lid"
           enabled: {
@@ -1651,6 +1703,24 @@ Panel {
           }
           options: Model.actionOptions()
           configKey: "lid." + root.ruleState + ".action"
+        }
+
+        // Suspend → hibernate is the only action that reads HibernateDelaySec,
+        // and either of the two rows above can select it — so the row appears
+        // for both, and sits under the lid rather than jumping between them.
+        // The value itself is global: logind has one HibernateDelaySec.
+        NumberRow {
+          label: "Hibernate after (min)"
+          description: "Every state, idle and lid alike"
+          visible: {
+            var _ = root.editConfig
+            return root.getVal("idle." + root.ruleState + ".afterSleep", "") === "suspend-then-hibernate"
+              || (root.getVal("lid.ignoreLidClose", false) !== true
+                  && root.getVal("lid." + root.ruleState + ".action", "") === "suspend-then-hibernate")
+          }
+          from: 1
+          to: 1440
+          configKey: "hibernateAfterMinutes"
         }
       }
 
@@ -1844,6 +1914,58 @@ Panel {
         InfoPair {
           label: "Privileged backend"
           value: !root.backendChecked ? "…" : (root.backendInstalled ? "Installed" : "Not installed")
+        }
+
+        Item { width: 1; height: Style.space(4) }
+
+        // Offered even when installed: a plugin update ships new script versions,
+        // and re-running this is how they reach /usr/local/libexec.
+        Button {
+          width: parent.width
+          text: root.backendInstalled ? "Reinstall backend" : "Install backend"
+          iconText: "󰇚"
+          iconSize: Style.font.body
+          fontSize: Style.font.bodySmall
+          foreground: root.fg
+          fontFamily: root.uiFont
+          verticalPadding: Style.spacing.controlPaddingY + Style.space(1)
+          bordered: true
+          selected: !root.backendInstalled
+          tooltipText: "Opens a terminal running: sudo " + root.installerPath
+          hasCursor: root.cursorOn("installer", 0)
+          onClicked: root.runBackendInstaller()
+          onHovered: function(h) { if (h) root.pointCursor("installer", 0) }
+        }
+
+        // Only offered once there is something to remove. Has to run before
+        // `omarchy plugin remove`, which cannot clean up after itself.
+        Button {
+          width: parent.width
+          visible: root.backendInstalled
+          text: "Uninstall backend"
+          iconText: "󰩺"
+          iconSize: Style.font.body
+          fontSize: Style.font.bodySmall
+          foreground: root.fg
+          fontFamily: root.uiFont
+          verticalPadding: Style.spacing.controlPaddingY + Style.space(1)
+          bordered: true
+          tooltipText: "Opens a terminal running: sudo " + root.uninstallerPath
+          hasCursor: root.cursorOn("uninstaller", 0)
+          onClicked: root.runBackendUninstaller()
+          onHovered: function(h) { if (h) root.pointCursor("uninstaller", 0) }
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          width: parent.width
+          text: "Both run in a terminal so you can see the command and type your password "
+              + "there, rather than being elevated silently from the panel. Uninstall before "
+              + "`omarchy plugin remove`, which cannot remove the root-owned files."
+          color: root.dim
+          font.family: root.uiFont
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
         }
       }
 
@@ -2053,28 +2175,49 @@ Panel {
       var p = spark.points
       if (!p || p.length < 2) return
 
-      var lo = spark.zeroBased ? 0 : p[0].y
+      var lo = p[0].y
       var hi = p[0].y
       for (var i = 1; i < p.length; i++) {
-        if (p[i].y < lo && !spark.zeroBased) lo = p[i].y
+        if (p[i].y < lo) lo = p[i].y
         if (p[i].y > hi) hi = p[i].y
       }
-      // Headroom so the trace never rides flat against an edge.
-      if (spark.zeroBased) hi = hi * 1.15 + 0.001
-      else { lo -= 0.5; hi += 0.5 }
+      // Headroom so the trace never rides flat against an edge. A zero-based
+      // axis must *contain* zero rather than start at it: signed data needs
+      // room on both sides, and for an all-positive trace this is the same
+      // axis as anchoring at the bottom.
+      if (spark.zeroBased) {
+        lo = Math.min(0, lo) * 1.15 - 0.001
+        hi = Math.max(0, hi) * 1.15 + 0.001
+      } else { lo -= 0.5; hi += 0.5 }
       var span = Math.max(0.0001, hi - lo)
 
       var x0 = p[0].x
       var dx = Math.max(1, p[p.length - 1].x - x0)
       var pad = 2
       function px(i) { return (p[i].x - x0) / dx * (spark.width - pad * 2) + pad }
-      function py(i) { return spark.height - 3 - (p[i].y - lo) / span * (spark.height - 6) }
+      function py(v) { return spark.height - 3 - (v - lo) / span * (spark.height - 6) }
+
+      // Where the fill hangs from. On a zero-based axis that is the zero line
+      // wherever it falls, so a discharge fills downward from it and a charge
+      // upward, and the two are drawn to the same scale.
+      var baseline = spark.zeroBased ? py(0) : spark.height
+
+      // Only worth a rule when the window actually straddles zero; otherwise
+      // it sits on the edge of the plot and says nothing the shape does not.
+      if (lo < 0 && hi > 0) {
+        ctx.strokeStyle = String(Util.alpha(spark.lineColor, 0.35))
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(pad, baseline)
+        ctx.lineTo(spark.width - pad, baseline)
+        ctx.stroke()
+      }
 
       // Fill under the line first, so the stroke sits on top of its own edge.
       ctx.beginPath()
-      ctx.moveTo(px(0), spark.height)
-      for (var a = 0; a < p.length; a++) ctx.lineTo(px(a), py(a))
-      ctx.lineTo(px(p.length - 1), spark.height)
+      ctx.moveTo(px(0), baseline)
+      for (var a = 0; a < p.length; a++) ctx.lineTo(px(a), py(p[a].y))
+      ctx.lineTo(px(p.length - 1), baseline)
       ctx.closePath()
       ctx.fillStyle = String(spark.fillColor)
       ctx.fill()
@@ -2084,8 +2227,8 @@ Panel {
       ctx.lineJoin = "round"
       ctx.beginPath()
       for (var b = 0; b < p.length; b++) {
-        if (b === 0) ctx.moveTo(px(b), py(b))
-        else ctx.lineTo(px(b), py(b))
+        if (b === 0) ctx.moveTo(px(b), py(p[b].y))
+        else ctx.lineTo(px(b), py(p[b].y))
       }
       ctx.stroke()
     }
@@ -2254,6 +2397,7 @@ Panel {
   component NumberRow: Item {
     id: numberRow
     property string label: ""
+    property string description: ""
     property string configKey: ""
     property int from: 0
     property int to: 100
@@ -2263,19 +2407,36 @@ Panel {
     }
 
     width: parent ? parent.width : 0
-    implicitHeight: Style.spacing.controlHeight + Style.space(4)
+    implicitHeight: Math.max(numberLabels.implicitHeight, Style.spacing.controlHeight) + Style.space(4)
 
-    Text {
-      textFormat: Text.PlainText
-      text: numberRow.label
-      color: root.fg
-      font.family: root.uiFont
-      font.pixelSize: Style.font.body
+    Column {
+      id: numberLabels
       anchors.left: parent.left
       anchors.right: numberField.left
       anchors.rightMargin: Style.space(10)
       anchors.verticalCenter: parent.verticalCenter
-      elide: Text.ElideRight
+      spacing: Style.spacing.xs
+
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        text: numberRow.label
+        color: root.fg
+        font.family: root.uiFont
+        font.pixelSize: Style.font.body
+        elide: Text.ElideRight
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        visible: numberRow.description !== ""
+        text: numberRow.description
+        color: root.dim
+        font.family: root.uiFont
+        font.pixelSize: Style.font.caption
+        elide: Text.ElideRight
+      }
     }
 
     NumberField {
@@ -2418,7 +2579,7 @@ Panel {
     visible: root.opened && root.openedFromMenu
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
-    WlrLayershell.namespace: "omarchy-power-manager"
+    WlrLayershell.namespace: "omarchy-power-advanced"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
     exclusionMode: ExclusionMode.Ignore

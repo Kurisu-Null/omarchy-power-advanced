@@ -1,10 +1,15 @@
-// Model.js — Power Manager helpers
+// Model.js — Power Advanced helpers
 
 function defaultConfig() {
   return {
     version: 1,
     enabled: true,
     batteryThreshold: 20,
+    // HibernateDelaySec in /etc/systemd/sleep.conf.d is a single system-wide
+    // value, so this is deliberately not per-state: logind reads the same
+    // number whether suspend-then-hibernate was triggered by an idle timeout
+    // or by the lid.
+    hibernateAfterMinutes: 30,
     profiles: {
       ac: "performance",
       batteryHigh: "balanced",
@@ -24,18 +29,15 @@ function defaultConfig() {
     idle: {
       ac: {
         sleepAfterMinutes: 30,
-        afterSleep: "suspend",
-        hibernateAfterMinutes: 60
+        afterSleep: "suspend"
       },
       batteryHigh: {
         sleepAfterMinutes: 15,
-        afterSleep: "suspend",
-        hibernateAfterMinutes: 30
+        afterSleep: "suspend"
       },
       batteryLow: {
         sleepAfterMinutes: 5,
-        afterSleep: "suspend",
-        hibernateAfterMinutes: 15
+        afterSleep: "suspend"
       }
     },
     lid: {
@@ -261,7 +263,7 @@ function stateLabel(key) {
 }
 
 // Which state the machine is in right now, given live UPower readings and the
-// configured low-battery threshold. Mirrors power-manager-profile-switch.
+// configured low-battery threshold. Mirrors power-advanced-profile-switch.
 function currentStateKey(onBattery, fraction, thresholdPercent) {
   if (!onBattery) return "ac";
   var threshold = (Number(thresholdPercent) || 0) / 100.0;
