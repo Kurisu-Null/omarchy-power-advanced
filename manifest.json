@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "kurisu-null.power-advanced",
   "name": "Power Advanced",
-  "version": "3.0.0",
+  "version": "1.0.0",
   "author": "Kurisu-Null",
   "description": "Battery health, charge limits, power profiles, and per-power-state sleep and lid rules in a native Omarchy panel",
   "kinds": [

@@ -146,17 +146,6 @@ sudo ~/.config/omarchy/plugins/kurisu-null.power-advanced/extras/install.sh
 omarchy restart shell
 ```
 
-### Migrating from `onlyvishesh.power-manager`
-The plugin reads the upstream config path as a fallback, so your settings carry over on first launch and get rewritten to `~/.config/kurisu-null.power-advanced.json` the next time you press Apply. Two things do not move themselves:
-```bash
-# battery health history
-mv ~/.local/state/omarchy/{onlyvishesh,kurisu-null}.power-manager
-
-# then remove the old plugin and its bar entry
-omarchy plugin remove onlyvishesh.power-manager
-```
-Both plugins can be installed at once if you want to compare them first — the ids differ, so they no longer collide.
-
 ### 📋 Dependencies
 
 Everything below ships with Omarchy except where noted, so on a stock system there is nothing to install.
