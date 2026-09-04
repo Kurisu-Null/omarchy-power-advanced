@@ -97,6 +97,10 @@ Panel {
   property var config: Model.defaultConfig()
   property var editConfig: Model.defaultConfig()
   readonly property bool configDirty: JSON.stringify(config) !== JSON.stringify(editConfig)
+  // What the footer and the Apply shortcut act on: either file having pending
+  // edits is something to commit. configDirty stays specific to this plugin's
+  // own config, because that is the only one whose write needs a password.
+  readonly property bool formDirty: configDirty || shellIdleDirty
 
   // ── Display-plugin awareness ──────────────────────────────────────────────
   //
@@ -273,17 +277,37 @@ Panel {
 
   function revertChanges() {
     root.editConfig = JSON.parse(JSON.stringify(root.config))
+    root.screensaverEdit = -1
+    root.lockEdit = -1
   }
 
   function applyChanges() {
     root.forceActiveFocus()
+
+    // The shell's config needs no privileges and cannot half-succeed, so it
+    // goes first and independently of the backend call below.
+    writeShellIdle()
+
+    // An edit that only touched Omarchy's timers has nothing for the
+    // privileged backend to do, and raising a password prompt to rewrite an
+    // unchanged file would be the panel asking for a password for nothing.
+    if (!root.configDirty) {
+      root.applyState = "ok"
+      applyOkTimer.restart()
+      return
+    }
+
     root.applyState = "writing"
     root.pendingWrite = Qt.btoa(JSON.stringify(root.editConfig, null, 2))
     configWriteProc.running = true
   }
 
+  // Omarchy's screensaver and lock are deliberately untouched: resetting this
+  // plugin is not consent to reset the shell's security timeout.
   function resetToDefaults() {
     root.editConfig = Model.defaultConfig()
+    root.screensaverEdit = -1
+    root.lockEdit = -1
     applyChanges()
   }
 
@@ -608,6 +632,106 @@ Panel {
     if (!batteryProc.running) batteryProc.running = true
     if (!profilesProc.running) profilesProc.running = true
     if (showBrightness && !brightnessReadProc.running) brightnessReadProc.running = true
+  }
+
+  // ── Omarchy's own screen timers ───────────────────────────────────────────
+  //
+  // screensaver and lock live in ~/.config/omarchy/shell.json, not in this
+  // plugin's config, because they are the shell's settings and its idle
+  // service is what acts on them. They are editable here anyway: this plugin
+  // owns the third timer in the same sequence (sleep), and a form that shows
+  // two of the three leaves the user to discover the interaction the hard way.
+  //
+  // What is *not* repeated is the mistake in power-advanced-profile-switch's
+  // comment: nothing is derived from anything. These are independent fields
+  // holding whatever the user typed, and the plugin never rewrites one because
+  // another changed.
+  //
+  // Writes go through the shell's own persistShellConfig(), the same entry
+  // point its bar uses for inline widget settings, so the file is written
+  // once, atomically, in the shell's format, by the shell. If that API is
+  // missing — an older Omarchy — the rows do not appear at all rather than
+  // writing the file behind its back.
+  //
+  // Seconds, not minutes: Omarchy stores seconds and its default screensaver
+  // timeout (150) is not a whole number of minutes, so a minutes field would
+  // silently round somebody's lock timeout on first Apply.
+  readonly property int omarchyDefaultScreensaverSecs: 150
+  readonly property int omarchyDefaultLockSecs: 300
+
+  readonly property bool canEditShellIdle: !!(bar && bar.shell && bar.shell.shellConfig)
+    && typeof bar.shell.persistShellConfig === "function"
+
+  readonly property var shellIdleLive: (bar && bar.shell && bar.shell.shellConfig
+    && typeof bar.shell.shellConfig.idle === "object" && bar.shell.shellConfig.idle)
+    ? bar.shell.shellConfig.idle : ({})
+
+  // Mirrors IdleModel.secondsFromConfig: anything negative or non-numeric
+  // falls back, and zero is a legal "act immediately" rather than "off".
+  function idleSecs(value, fallback) {
+    var n = Number(value)
+    if (!isFinite(n) || n < 0) return fallback
+    return Math.floor(n)
+  }
+
+  readonly property int liveScreensaverSecs: idleSecs(shellIdleLive.screensaver, omarchyDefaultScreensaverSecs)
+  readonly property int liveLockSecs: idleSecs(shellIdleLive.lock, omarchyDefaultLockSecs)
+
+  // -1 means "not touched this session", so the fields keep tracking the
+  // shell's live values until the user actually edits one.
+  property int screensaverEdit: -1
+  property int lockEdit: -1
+  readonly property int screensaverStaged: screensaverEdit >= 0 ? screensaverEdit : liveScreensaverSecs
+  readonly property int lockStaged: lockEdit >= 0 ? lockEdit : liveLockSecs
+  readonly property bool shellIdleDirty: canEditShellIdle
+    && (screensaverStaged !== liveScreensaverSecs || lockStaged !== liveLockSecs)
+
+  // The shortest idle-sleep timeout any state can actually reach, in seconds.
+  // Lock is one global value, so it is the shortest sleep it has to beat —
+  // states set to "Do nothing" or to no timeout never sleep and do not count.
+  readonly property int shortestSleepSecs: {
+    var _ = root.editConfig
+    var states = Model.powerStates()
+    var best = 0
+    for (var i = 0; i < states.length; i++) {
+      var key = states[i].key
+      if (root.getVal("idle." + key + ".afterSleep", "ignore") === "ignore") continue
+      var mins = parseInt(root.getVal("idle." + key + ".sleepAfterMinutes", 0)) || 0
+      if (mins <= 0) continue
+      if (best === 0 || mins * 60 < best) best = mins * 60
+    }
+    return best
+  }
+
+  // A minute of daylight between locking and sleeping. Zero means nothing
+  // sleeps, so there is nothing to stay ahead of.
+  readonly property int lockCeilingSecs: shortestSleepSecs > 60 ? shortestSleepSecs - 60 : 0
+
+  // The case worth warning about: the machine can suspend before it finishes
+  // locking. Neither logind nor Omarchy's idle service locks a session on
+  // suspend by itself, so unless something else on the machine does, it
+  // resumes unlocked.
+  readonly property bool lockNotBeforeSleep: canEditShellIdle
+    && shortestSleepSecs > 0 && lockStaged >= shortestSleepSecs
+
+  function formatSecs(seconds) {
+    var total = Math.max(0, Math.round(Number(seconds) || 0))
+    if (total < 60) return total + " s"
+    var m = Math.floor(total / 60)
+    var s = total % 60
+    return m + " min" + (s > 0 ? " " + s + " s" : "")
+  }
+
+  function writeShellIdle() {
+    if (!canEditShellIdle || !shellIdleDirty) return
+    var next = JSON.parse(JSON.stringify(bar.shell.shellConfig))
+    if (!next.idle || typeof next.idle !== "object") next.idle = {}
+    next.idle.screensaver = root.screensaverStaged
+    next.idle.lock = root.lockStaged
+    bar.shell.persistShellConfig(next)
+    // Back to tracking the shell, which has just become what we staged.
+    root.screensaverEdit = -1
+    root.lockEdit = -1
   }
 
   // ── Idle sleep ────────────────────────────────────────────────────────────
@@ -996,7 +1120,7 @@ Panel {
       Item {
         id: footer
         width: parent.width
-        visible: root.configDirty
+        visible: root.formDirty
         implicitHeight: footerRow.implicitHeight + Style.space(11)
 
         PanelSeparator {
@@ -1764,6 +1888,67 @@ Panel {
           visible: root.showAutoBrightness
           configKey: "brightness.auto"
         }
+
+        // ---------- Omarchy's screen timers ----------
+        //
+        // Someone else's settings, edited here because they are the first two
+        // steps of the sequence this plugin finishes. Marked as such, so the
+        // panel never implies it owns the lock screen.
+        Column {
+          width: parent.width
+          spacing: Style.space(6)
+          visible: root.canEditShellIdle
+
+          Item { width: 1; height: Style.space(4) }
+
+          Text {
+            textFormat: Text.PlainText
+            width: parent.width
+            text: "Omarchy's own idle timers, shared with the whole shell — this "
+              + "panel only edits them."
+            color: root.dim
+            font.family: root.uiFont
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+
+          NumberRow {
+            label: "Blank the screen after (s)"
+            description: root.formatSecs(root.screensaverStaged)
+            // Never offer 0: Omarchy reads it as "immediately", not "off".
+            from: Math.min(root.screensaverStaged, 30)
+            to: Math.max(root.screensaverStaged, root.lockStaged)
+            externalValue: root.screensaverStaged
+            onCommitted: function(v) { root.screensaverEdit = v }
+          }
+
+          NumberRow {
+            label: "Lock the screen after (s)"
+            description: root.formatSecs(root.lockStaged)
+            from: Math.min(root.lockStaged, Math.max(30, root.screensaverStaged))
+            // Capped a minute short of the soonest sleep, so the lock cannot
+            // be pushed past the suspend that would outrun it. The current
+            // value always stays reachable — a config that already breaks the
+            // rule is reported, not silently rewritten.
+            to: Math.max(root.lockStaged, root.lockCeilingSecs > 0 ? root.lockCeilingSecs : 3600)
+            externalValue: root.lockStaged
+            onCommitted: function(v) { root.lockEdit = v }
+          }
+
+          Text {
+            textFormat: Text.PlainText
+            width: parent.width
+            visible: root.lockNotBeforeSleep
+            text: "Locking at " + root.formatSecs(root.lockStaged) + " is not before the "
+              + "soonest sleep at " + root.formatSecs(root.shortestSleepSecs)
+              + ". The machine can suspend before it finishes locking, and resume "
+              + "unlocked. Lower the lock, or raise that state's sleep timeout."
+            color: root.urgent
+            font.family: root.uiFont
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+        }
       }
 
       Item { width: 1; height: Style.space(2) }
@@ -2398,10 +2583,16 @@ Panel {
     id: numberRow
     property string label: ""
     property string description: ""
+    // Rows that stage into editConfig set configKey. Rows whose value lives
+    // somewhere else — Omarchy's shell.json — leave it empty, pass the value
+    // in and take the edit back through committed().
     property string configKey: ""
+    property int externalValue: 0
+    signal committed(int value)
     property int from: 0
     property int to: 100
     readonly property int currentValue: {
+      if (numberRow.configKey === "") return numberRow.externalValue
       var _ = root.editConfig
       return parseInt(root.getVal(numberRow.configKey, 0)) || 0
     }
@@ -2450,7 +2641,10 @@ Panel {
       foreground: root.fg
       fontFamily: root.uiFont
       fontSize: Style.font.bodySmall
-      onModified: function(v) { root.setVal(numberRow.configKey, v) }
+      onModified: function(v) {
+        if (numberRow.configKey === "") numberRow.committed(v)
+        else root.setVal(numberRow.configKey, v)
+      }
     }
 
     // Same reason as SelectRow: the SpinBox writes its own value while the
@@ -2562,7 +2756,7 @@ Panel {
           root.selectTab(root.tabs[tabIndex].value)
           return
         }
-        if (t === "a" && root.configDirty) root.applyChanges()
+        if (t === "a" && root.formDirty) root.applyChanges()
       }
 
       Loader {
@@ -2628,7 +2822,7 @@ Panel {
             root.selectTab(root.tabs[tabIndex].value)
             return
           }
-          if (t === "a" && root.configDirty) root.applyChanges()
+          if (t === "a" && root.formDirty) root.applyChanges()
         }
 
         Loader {
